@@ -172,10 +172,11 @@ export default function SandboxDetailPage() {
       setExtensionScript(result.setup_script);
 
       setInstallLog((p) => p + "Uploading setup script to sandbox...\n");
-      const blob = new Blob([result.setup_script], { type: "text/plain" });
+      const scriptBlob = new Blob([result.setup_script], { type: "text/plain" });
+      const metaBlob = new Blob([JSON.stringify({ path: "/tmp/ext-setup.sh", mode: 755 })], { type: "application/json" });
       const formData = new FormData();
-      formData.append("metadata", JSON.stringify({ path: "/tmp/ext-setup.sh", mode: 755 }));
-      formData.append("file", blob, "ext-setup.sh");
+      formData.append("metadata", metaBlob, "metadata.json");
+      formData.append("file", scriptBlob, "ext-setup.sh");
       await fetch(`${proxyBase}/files/upload`, { method: "POST", body: formData });
 
       setInstallLog((p) => p + "Executing setup script...\n");
@@ -235,10 +236,11 @@ export default function SandboxDetailPage() {
       const result = await runProvisioningOnSandbox(id, scriptId);
       setProvLog((p) => p + `Uploading "${result.script_name}" to sandbox...\n`);
 
-      const blob = new Blob([result.script], { type: "text/plain" });
+      const provBlob = new Blob([result.script], { type: "text/plain" });
+      const provMetaBlob = new Blob([JSON.stringify({ path: "/tmp/provision.sh", mode: 755 })], { type: "application/json" });
       const formData = new FormData();
-      formData.append("metadata", JSON.stringify({ path: "/tmp/provision.sh", mode: 755 }));
-      formData.append("file", blob, "provision.sh");
+      formData.append("metadata", provMetaBlob, "metadata.json");
+      formData.append("file", provBlob, "provision.sh");
       await fetch(`${proxyBase}/files/upload`, { method: "POST", body: formData });
 
       setProvLog((p) => p + "Executing provisioning script...\n");

@@ -115,10 +115,16 @@ export function FileBrowser({ sandboxId, port = 44772 }: Props) {
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
         const targetPath = cwd === "/" ? `/${file.name}` : `${cwd}/${file.name}`;
+        const metaJson = JSON.stringify({ path: targetPath, mode: 644 });
+        const metaBlob = new Blob([metaJson], { type: "application/json" });
         const formData = new FormData();
-        formData.append("metadata", JSON.stringify({ path: targetPath, mode: 644 }));
-        formData.append("file", file);
-        await fetch(`${proxy}/files/upload`, { method: "POST", body: formData });
+        formData.append("metadata", metaBlob, "metadata.json");
+        formData.append("file", file, file.name);
+        const res = await fetch(`${proxy}/files/upload`, { method: "POST", body: formData });
+        if (!res.ok) {
+          const text = await res.text().catch(() => "");
+          alert(`Upload failed for ${file.name}: ${text}`);
+        }
       }
       fetchDir(cwd);
     } catch (e: any) { alert(`Upload error: ${e.message}`); }
