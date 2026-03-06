@@ -1,134 +1,92 @@
-# Copyright 2025 Alibaba Group Holding Ltd.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
 """
 Authentication middleware for OpenSandbox Lifecycle API.
 
-This module implements API Key authentication as specified in the OpenAPI spec.
-API keys are configured via config.toml and validated against the OPEN-SANDBOX-API-KEY header.
+Pure ASGI middleware to avoid buffering streaming (SSE) responses.
+API keys are configured via config.toml and validated against the
+OPEN-SANDBOX-API-KEY header.
 """
 
 import re
-from typing import Callable, Optional
+import json
+from typing import Optional, Set
 
-from fastapi import Request, Response, status
-from fastapi.responses import JSONResponse
-from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from src.config import AppConfig, get_config
 
 
-class AuthMiddleware(BaseHTTPMiddleware):
+class AuthMiddleware:
     """
-    Middleware for API Key authentication.
+    ASGI middleware for API Key authentication.
 
-    Validates the OPEN-SANDBOX-API-KEY header for all requests except health check.
-    Returns 401 Unauthorized if authentication fails.
+    Validates the OPEN-SANDBOX-API-KEY header for all requests except
+    health check, docs, and proxy paths.
     """
 
-    API_KEY_HEADER = "OPEN-SANDBOX-API-KEY"
+    API_KEY_HEADER = "open-sandbox-api-key"
 
-    # Paths that don't require authentication
     EXEMPT_PATHS = ["/health", "/docs", "/redoc", "/openapi.json", "/metrics/prometheus"]
 
-    # Strict pattern for proxy-to-sandbox: /sandboxes/{id}/proxy/{port}/... with numeric port only.
-    # Matches the actual route in lifecycle.py; rejects path traversal (..) and malformed port.
     _PROXY_PATH_RE = re.compile(r"^(/v1)?/sandboxes/[^/]+/proxy/\d+(/|$)")
+
+    def __init__(self, app: ASGIApp, config: Optional[AppConfig] = None) -> None:
+        self.app = app
+        cfg = config or get_config()
+        api_key = cfg.server.api_key
+        self.valid_api_keys: Set[str] = {api_key} if api_key and api_key.strip() else set()
 
     @staticmethod
     def _is_proxy_path(path: str) -> bool:
-        """True only for the exact proxy-route shape; rejects path traversal (..)."""
         if ".." in path:
             return False
         return bool(AuthMiddleware._PROXY_PATH_RE.match(path))
 
-    def __init__(self, app, config: Optional[AppConfig] = None):
-        """
-        Initialize authentication middleware.
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
 
-        Args:
-            app: FastAPI application instance
-            config: Optional application configuration (for dependency injection)
-        """
-        super().__init__(app)
-        self.config = config or get_config()
-        # Read the API key directly from config; suitable for dev/test usage
-        self.valid_api_keys = self._load_api_keys()
+        path = scope.get("path", "")
 
-    def _load_api_keys(self) -> set:
-        """
-        Load valid API keys from configuration.
+        if any(path.startswith(p) for p in self.EXEMPT_PATHS):
+            await self.app(scope, receive, send)
+            return
 
-        Returns:
-            set: Set of valid API keys
-        """
-        # Supports a single API key from config; extend later for secret managers
-        api_key = self.config.server.api_key
-        # Treat empty string as no key configured
-        if api_key and api_key.strip():
-            return {api_key}
-        return set()
+        if self._is_proxy_path(path):
+            await self.app(scope, receive, send)
+            return
 
-    async def dispatch(self, request: Request, call_next: Callable) -> Response:
-        """
-        Process each request and validate authentication.
-
-        Args:
-            request: Incoming HTTP request
-            call_next: Next middleware or route handler
-
-        Returns:
-            Response: HTTP response
-        """
-        # Skip authentication for exempt paths
-        if any(request.url.path.startswith(path) for path in self.EXEMPT_PATHS):
-            return await call_next(request)
-
-        # Skip authentication only for the exact proxy-to-sandbox route shape
-        # (no path traversal, no loose substring match)
-        if self._is_proxy_path(request.url.path):
-            return await call_next(request)
-
-        # If no API keys are configured, skip authentication
         if not self.valid_api_keys:
-            return await call_next(request)
+            await self.app(scope, receive, send)
+            return
 
-        # Extract API key from header
-        api_key = request.headers.get(self.API_KEY_HEADER)
+        headers = dict(scope.get("headers", []))
+        api_key = headers.get(self.API_KEY_HEADER.encode(), b"").decode()
 
-        # Validate API key
         if not api_key:
-            return JSONResponse(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                content={
-                    "code": "MISSING_API_KEY",
-                    "message": "Authentication credentials are missing. "
-                    "Provide API key via OPEN-SANDBOX-API-KEY header.",
-                },
-            )
+            await self._send_error(send, 401, "MISSING_API_KEY",
+                "Authentication credentials are missing. Provide API key via OPEN-SANDBOX-API-KEY header.")
+            return
 
-        # Enforce strict comparison whenever API keys are configured
-        if self.valid_api_keys and api_key not in self.valid_api_keys:
-            return JSONResponse(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                content={
-                    "code": "INVALID_API_KEY",
-                    "message": "Authentication credentials are invalid. "
-                    "Check your API key and try again.",
-                },
-            )
+        if api_key not in self.valid_api_keys:
+            await self._send_error(send, 401, "INVALID_API_KEY",
+                "Authentication credentials are invalid. Check your API key and try again.")
+            return
 
-        # Authentication successful, proceed to next middleware/handler
-        response = await call_next(request)
-        return response
+        await self.app(scope, receive, send)
+
+    @staticmethod
+    async def _send_error(send: Send, status: int, code: str, message: str) -> None:
+        body = json.dumps({"code": code, "message": message}).encode()
+        await send({
+            "type": "http.response.start",
+            "status": status,
+            "headers": [
+                [b"content-type", b"application/json"],
+                [b"content-length", str(len(body)).encode()],
+            ],
+        })
+        await send({
+            "type": "http.response.body",
+            "body": body,
+        })

@@ -84,6 +84,17 @@ export function SandboxTerminal({ sandboxId, port = 44772 }: Props) {
         }
         update({ output: out, error: err });
       }
+      // Process remaining buffer
+      if (buffer.startsWith("data: ")) {
+        try {
+          const ev = JSON.parse(buffer.slice(6));
+          if (ev.type === "stdout" && ev.text) out += ev.text;
+          else if (ev.type === "stderr" && ev.text) err += ev.text;
+          else if (ev.type === "error" && ev.error) {
+            err += `${ev.error.ename || "Error"}: ${ev.error.evalue || ""}\n`;
+          }
+        } catch { /* skip */ }
+      }
       update({ output: out, error: err, done: true });
     } catch (e: any) {
       update({ error: e.message, done: true });

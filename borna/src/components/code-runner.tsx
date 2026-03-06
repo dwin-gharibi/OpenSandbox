@@ -109,6 +109,16 @@ export function CodeRunner({ sandboxId, port = 44772 }: Props) {
         setOutput(out);
         setError(err);
       }
+      // Process remaining buffer
+      if (buffer.startsWith("data: ")) {
+        try {
+          const ev = JSON.parse(buffer.slice(6));
+          if (ev.type === "stdout" && ev.text) out += ev.text;
+          else if (ev.type === "stderr" && ev.text) err += ev.text;
+          else if (ev.type === "result" && ev.results?.["text/plain"]) out += ev.results["text/plain"] + "\n";
+        } catch { /* skip */ }
+      }
+      if (!out && !err) out = "(no output)\n";
       setOutput(out);
       setError(err);
     } catch (e: any) {
