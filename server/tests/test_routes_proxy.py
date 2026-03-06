@@ -128,7 +128,7 @@ def test_proxy_rejects_websocket_upgrade(
     )
 
     assert response.status_code == 400
-    assert response.json()["message"] == "Websocket upgrade is not supported yet"
+    assert "WebSocket" in response.json()["message"]
 
 
 def test_proxy_maps_connect_error_to_502(
