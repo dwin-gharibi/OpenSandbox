@@ -155,7 +155,7 @@ export default function SandboxDetailPage() {
     try { setAvailableExtensions(await listExtensions()); } catch { /* ignore */ }
   };
 
-  const apiBase = process.env.NEXT_PUBLIC_API_URL || "/api/proxy";
+  const proxyBase = `${process.env.NEXT_PUBLIC_API_URL || "/api/proxy"}/sandboxes/${id}/proxy/44772`;
 
   const handleApplyExtensions = async () => {
     if (selectedExtensions.length === 0) { alert("Select at least one extension"); return; }
@@ -164,25 +164,46 @@ export default function SandboxDetailPage() {
     try {
       const result = await applyExtensions(id, selectedExtensions);
       setExtensionScript(result.setup_script);
-      setInstallLog((p) => p + "Executing setup script inside sandbox...\n");
 
-      const url = `${apiBase}/sandboxes/${id}/proxy/${44772}/command`;
-      const res = await fetch(url, {
+      setInstallLog((p) => p + "Uploading setup script to sandbox...\n");
+      const blob = new Blob([result.setup_script], { type: "text/plain" });
+      const formData = new FormData();
+      formData.append("metadata", JSON.stringify({ path: "/tmp/ext-setup.sh", mode: 755 }));
+      formData.append("file", blob, "ext-setup.sh");
+      await fetch(`${proxyBase}/files/upload`, { method: "POST", body: formData });
+
+      setInstallLog((p) => p + "Executing setup script...\n");
+      const res = await fetch(`${proxyBase}/command`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          command: `bash -c '${result.setup_script.replace(/'/g, "'\\''")}'`,
-          timeout: 120,
-          background: false,
-        }),
+        body: JSON.stringify({ command: "bash /tmp/ext-setup.sh", timeout: 120000 }),
       });
 
       if (!res.ok) {
-        const text = await res.text().catch(() => "");
-        setInstallLog((p) => p + `Installation failed: ${text}\n`);
+        setInstallLog((p) => p + `Installation returned HTTP ${res.status}\n`);
       } else {
-        const text = await res.text();
-        setInstallLog((p) => p + text + "\nInstallation complete!\n");
+        const reader = res.body?.getReader();
+        if (reader) {
+          const decoder = new TextDecoder();
+          let buf = "";
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buf += decoder.decode(value, { stream: true });
+            const lines = buf.split("\n");
+            buf = lines.pop() || "";
+            for (const line of lines) {
+              if (!line.startsWith("data: ")) continue;
+              try {
+                const ev = JSON.parse(line.slice(6));
+                if (ev.type === "stdout" && ev.text) setInstallLog((p) => p + ev.text);
+                else if (ev.type === "stderr" && ev.text) setInstallLog((p) => p + ev.text);
+                else if (ev.type === "error" && ev.error) setInstallLog((p) => p + `Error: ${ev.error.evalue || ev.error.ename}\n`);
+              } catch { /* skip */ }
+            }
+          }
+        }
+        setInstallLog((p) => p + "\nInstallation complete!\n");
         setInstalledExtensions((prev) => [...new Set([...prev, ...selectedExtensions])]);
         setSelectedExtensions([]);
       }

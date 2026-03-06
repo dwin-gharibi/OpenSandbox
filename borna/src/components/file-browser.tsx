@@ -9,28 +9,25 @@ import {
 interface Props {
   sandboxId: string;
   port?: number;
-  apiBase?: string;
 }
 
-interface FileInfo {
-  name: string;
+interface FileEntry {
   path: string;
-  is_dir: boolean;
+  name: string;
+  isDir: boolean;
   size: number;
-  mod_time?: string;
-  permissions?: string;
+  modifiedAt?: string;
 }
 
-export function FileBrowser({ sandboxId, port = 44772, apiBase }: Props) {
-  const base = apiBase || process.env.NEXT_PUBLIC_API_URL || "/api/proxy";
-  const proxyBase = `${base}/sandboxes/${sandboxId}/proxy/${port}`;
+export function FileBrowser({ sandboxId, port = 44772 }: Props) {
+  const base = process.env.NEXT_PUBLIC_API_URL || "/api/proxy";
+  const proxy = `${base}/sandboxes/${sandboxId}/proxy/${port}`;
 
   const [cwd, setCwd] = useState("/");
-  const [entries, setEntries] = useState<FileInfo[]>([]);
+  const [entries, setEntries] = useState<FileEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [preview, setPreview] = useState<{ name: string; content: string } | null>(null);
-  const [pathHistory, setPathHistory] = useState<string[]>(["/"]);
   const uploadRef = useRef<HTMLInputElement>(null);
 
   const fetchDir = async (path: string) => {
@@ -38,26 +35,38 @@ export function FileBrowser({ sandboxId, port = 44772, apiBase }: Props) {
     setError("");
     setPreview(null);
     try {
-      const res = await fetch(`${proxyBase}/files/info?path=${encodeURIComponent(path)}`);
+      const res = await fetch(
+        `${proxy}/files/search?path=${encodeURIComponent(path)}&pattern=*`
+      );
       if (!res.ok) {
-        const text = await res.text().catch(() => `HTTP ${res.status}`);
-        setError(text);
+        setError(await res.text().catch(() => `HTTP ${res.status}`));
         setEntries([]);
         setLoading(false);
         return;
       }
       const data = await res.json();
-      const items: FileInfo[] = Array.isArray(data) ? data
-        : data.entries ? data.entries
-        : data.children ? data.children
-        : [data];
+      const items: any[] = Array.isArray(data) ? data : [];
 
-      const sorted = items.sort((a, b) => {
-        if (a.is_dir && !b.is_dir) return -1;
-        if (!a.is_dir && b.is_dir) return 1;
-        return (a.name || "").localeCompare(b.name || "");
+      const mapped: FileEntry[] = items.map((f: any) => {
+        const fullPath = f.path || "";
+        const name = fullPath.split("/").filter(Boolean).pop() || fullPath;
+        const isDir = f.mode !== undefined ? (f.mode & 0o40000) !== 0 : !!f.is_dir;
+        return {
+          path: fullPath,
+          name,
+          isDir,
+          size: f.size || 0,
+          modifiedAt: f.modified_at,
+        };
+      }).filter((f) => f.path !== path);
+
+      mapped.sort((a, b) => {
+        if (a.isDir && !b.isDir) return -1;
+        if (!a.isDir && b.isDir) return 1;
+        return a.name.localeCompare(b.name);
       });
-      setEntries(sorted);
+
+      setEntries(mapped);
       setCwd(path);
     } catch (e: any) {
       setError(e.message);
@@ -69,19 +78,17 @@ export function FileBrowser({ sandboxId, port = 44772, apiBase }: Props) {
 
   useEffect(() => { fetchDir(cwd); }, []);
 
-  const navigate = (path: string) => {
-    setPathHistory((prev) => [...prev, path]);
-    fetchDir(path);
-  };
+  const navigate = (path: string) => fetchDir(path);
 
   const goBack = () => {
-    const parent = cwd.split("/").slice(0, -1).join("/") || "/";
-    navigate(parent);
+    const parts = cwd.split("/").filter(Boolean);
+    parts.pop();
+    navigate("/" + parts.join("/") || "/");
   };
 
-  const handleDownload = async (path: string, name: string) => {
+  const handleDownload = async (filePath: string, name: string) => {
     try {
-      const res = await fetch(`${proxyBase}/files/download?path=${encodeURIComponent(path)}`);
+      const res = await fetch(`${proxy}/files/download?path=${encodeURIComponent(filePath)}`);
       if (!res.ok) { alert("Download failed"); return; }
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
@@ -90,52 +97,41 @@ export function FileBrowser({ sandboxId, port = 44772, apiBase }: Props) {
       a.download = name;
       a.click();
       URL.revokeObjectURL(url);
-    } catch (e: any) {
-      alert(`Download error: ${e.message}`);
-    }
+    } catch (e: any) { alert(`Download error: ${e.message}`); }
   };
 
-  const handlePreview = async (path: string, name: string) => {
+  const handlePreview = async (filePath: string, name: string) => {
     try {
-      const res = await fetch(`${proxyBase}/files/download?path=${encodeURIComponent(path)}`);
-      if (!res.ok) { alert("Cannot preview file"); return; }
+      const res = await fetch(`${proxy}/files/download?path=${encodeURIComponent(filePath)}`);
+      if (!res.ok) { alert("Cannot preview"); return; }
       const text = await res.text();
       setPreview({ name, content: text.slice(0, 50000) });
-    } catch (e: any) {
-      alert(`Preview error: ${e.message}`);
-    }
+    } catch (e: any) { alert(`Preview error: ${e.message}`); }
   };
 
   const handleUpload = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
     try {
-      const formData = new FormData();
-      formData.append("path", cwd);
       for (let i = 0; i < files.length; i++) {
-        formData.append("files", files[i]);
+        const file = files[i];
+        const targetPath = cwd === "/" ? `/${file.name}` : `${cwd}/${file.name}`;
+        const formData = new FormData();
+        formData.append("metadata", JSON.stringify({ path: targetPath, mode: 644 }));
+        formData.append("file", file);
+        await fetch(`${proxy}/files/upload`, { method: "POST", body: formData });
       }
-      const res = await fetch(`${proxyBase}/files/upload`, {
-        method: "POST",
-        body: formData,
-      });
-      if (!res.ok) { alert("Upload failed"); return; }
       fetchDir(cwd);
-    } catch (e: any) {
-      alert(`Upload error: ${e.message}`);
-    }
+    } catch (e: any) { alert(`Upload error: ${e.message}`); }
   };
 
-  const handleDelete = async (path: string) => {
-    if (!confirm(`Delete ${path}?`)) return;
+  const handleDelete = async (filePath: string, isDir: boolean) => {
+    if (!confirm(`Delete ${filePath}?`)) return;
     try {
-      const res = await fetch(`${proxyBase}/files?path=${encodeURIComponent(path)}`, {
-        method: "DELETE",
-      });
-      if (!res.ok) { alert("Delete failed"); return; }
+      const endpoint = isDir ? "directories" : "files";
+      const res = await fetch(`${proxy}/${endpoint}?path=${encodeURIComponent(filePath)}`, { method: "DELETE" });
+      if (!res.ok) alert("Delete failed: " + await res.text().catch(() => ""));
       fetchDir(cwd);
-    } catch (e: any) {
-      alert(`Delete error: ${e.message}`);
-    }
+    } catch (e: any) { alert(`Delete error: ${e.message}`); }
   };
 
   const handleCreateDir = async () => {
@@ -143,20 +139,17 @@ export function FileBrowser({ sandboxId, port = 44772, apiBase }: Props) {
     if (!name) return;
     const fullPath = cwd === "/" ? `/${name}` : `${cwd}/${name}`;
     try {
-      const res = await fetch(`${proxyBase}/directories`, {
+      await fetch(`${proxy}/directories`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ path: fullPath }),
+        body: JSON.stringify({ [fullPath]: { mode: 755 } }),
       });
-      if (!res.ok) { alert("Create directory failed"); return; }
       fetchDir(cwd);
-    } catch (e: any) {
-      alert(`Error: ${e.message}`);
-    }
+    } catch (e: any) { alert(`Error: ${e.message}`); }
   };
 
   const formatSize = (bytes: number): string => {
-    if (bytes === 0) return "-";
+    if (bytes <= 0) return "-";
     if (bytes < 1024) return `${bytes} B`;
     if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)} KB`;
     if (bytes < 1073741824) return `${(bytes / 1048576).toFixed(1)} MB`;
@@ -168,24 +161,24 @@ export function FileBrowser({ sandboxId, port = 44772, apiBase }: Props) {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2 text-sm">
+        <div className="flex items-center gap-1 text-sm overflow-x-auto">
           <button onClick={goBack} disabled={cwd === "/"} className="btn btn-ghost p-1.5 disabled:opacity-30">
             <ArrowLeft className="w-4 h-4" />
           </button>
-          <button onClick={() => navigate("/")} className="text-[var(--accent)] hover:underline">/</button>
+          <button onClick={() => navigate("/")} className="text-[var(--accent)] hover:underline px-1">/</button>
           {breadcrumbs.map((part, i) => {
             const path = "/" + breadcrumbs.slice(0, i + 1).join("/");
             return (
-              <span key={path} className="flex items-center gap-1">
+              <span key={`bc-${i}`} className="flex items-center gap-1">
                 <ChevronRight className="w-3 h-3 text-[var(--text-secondary)]" />
                 <button onClick={() => navigate(path)} className="text-[var(--accent)] hover:underline">{part}</button>
               </span>
             );
           })}
         </div>
-        <div className="flex gap-2">
-          <button onClick={handleCreateDir} className="btn btn-ghost text-sm"><FolderPlus className="w-4 h-4" /> New Dir</button>
-          <button onClick={() => uploadRef.current?.click()} className="btn btn-ghost text-sm"><Upload className="w-4 h-4" /> Upload</button>
+        <div className="flex gap-2 shrink-0">
+          <button onClick={handleCreateDir} className="btn btn-ghost text-sm"><FolderPlus className="w-4 h-4" /></button>
+          <button onClick={() => uploadRef.current?.click()} className="btn btn-ghost text-sm"><Upload className="w-4 h-4" /></button>
           <button onClick={() => fetchDir(cwd)} className="btn btn-ghost p-1.5"><RefreshCw className="w-4 h-4" /></button>
           <input ref={uploadRef} type="file" multiple className="hidden" onChange={(e) => handleUpload(e.target.files)} />
         </div>
@@ -200,10 +193,7 @@ export function FileBrowser({ sandboxId, port = 44772, apiBase }: Props) {
       {preview && (
         <div className="card">
           <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center gap-2">
-              <FileText className="w-4 h-4 text-[var(--accent)]" />
-              <h3 className="font-semibold text-sm">{preview.name}</h3>
-            </div>
+            <div className="flex items-center gap-2"><FileText className="w-4 h-4 text-[var(--accent)]" /><h3 className="font-semibold text-sm">{preview.name}</h3></div>
             <button onClick={() => setPreview(null)} className="btn btn-ghost text-xs">Close</button>
           </div>
           <pre className="text-xs bg-[#0d1117] text-[#c9d1d9] p-4 rounded-lg overflow-auto max-h-80 font-mono">{preview.content}</pre>
@@ -218,49 +208,37 @@ export function FileBrowser({ sandboxId, port = 44772, apiBase }: Props) {
         ) : (
           <div className="table-container">
             <table>
-              <thead>
-                <tr><th>Name</th><th>Size</th><th>Modified</th><th>Actions</th></tr>
-              </thead>
+              <thead><tr><th>Name</th><th>Size</th><th>Modified</th><th>Actions</th></tr></thead>
               <tbody>
-                {entries.map((entry) => {
-                  const fullPath = cwd === "/" ? `/${entry.name}` : `${cwd}/${entry.name}`;
-                  return (
-                    <tr key={entry.name || entry.path}>
-                      <td>
-                        <div className="flex items-center gap-2">
-                          {entry.is_dir
-                            ? <Folder className="w-4 h-4 text-[var(--accent)]" />
-                            : <File className="w-4 h-4 text-[var(--text-secondary)]" />
-                          }
-                          {entry.is_dir ? (
-                            <button onClick={() => navigate(fullPath)}
-                              className="text-[var(--accent)] hover:underline text-sm">{entry.name}</button>
-                          ) : (
-                            <span className="text-sm">{entry.name}</span>
-                          )}
-                        </div>
-                      </td>
-                      <td className="text-[var(--text-secondary)] text-sm">{entry.is_dir ? "-" : formatSize(entry.size)}</td>
-                      <td className="text-[var(--text-secondary)] text-sm">
-                        {entry.mod_time ? new Date(entry.mod_time).toLocaleString() : "-"}
-                      </td>
-                      <td>
-                        <div className="flex gap-1">
-                          {!entry.is_dir && (
-                            <>
-                              <button onClick={() => handlePreview(fullPath, entry.name)}
-                                className="btn btn-ghost p-1" title="Preview"><Eye className="w-3.5 h-3.5" /></button>
-                              <button onClick={() => handleDownload(fullPath, entry.name)}
-                                className="btn btn-ghost p-1" title="Download"><Download className="w-3.5 h-3.5" /></button>
-                            </>
-                          )}
-                          <button onClick={() => handleDelete(fullPath)}
-                            className="btn btn-ghost p-1" title="Delete"><Trash2 className="w-3.5 h-3.5 text-[var(--danger)]" /></button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
+                {entries.map((entry) => (
+                  <tr key={`file-${entry.path}`}>
+                    <td>
+                      <div className="flex items-center gap-2">
+                        {entry.isDir
+                          ? <Folder className="w-4 h-4 text-[var(--accent)]" />
+                          : <File className="w-4 h-4 text-[var(--text-secondary)]" />}
+                        {entry.isDir ? (
+                          <button onClick={() => navigate(entry.path)} className="text-[var(--accent)] hover:underline text-sm">{entry.name}</button>
+                        ) : (
+                          <span className="text-sm">{entry.name}</span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="text-[var(--text-secondary)] text-sm">{entry.isDir ? "-" : formatSize(entry.size)}</td>
+                    <td className="text-[var(--text-secondary)] text-sm">{entry.modifiedAt ? new Date(entry.modifiedAt).toLocaleString() : "-"}</td>
+                    <td>
+                      <div className="flex gap-1">
+                        {!entry.isDir && (
+                          <>
+                            <button onClick={() => handlePreview(entry.path, entry.name)} className="btn btn-ghost p-1" title="Preview"><Eye className="w-3.5 h-3.5" /></button>
+                            <button onClick={() => handleDownload(entry.path, entry.name)} className="btn btn-ghost p-1" title="Download"><Download className="w-3.5 h-3.5" /></button>
+                          </>
+                        )}
+                        <button onClick={() => handleDelete(entry.path, entry.isDir)} className="btn btn-ghost p-1" title="Delete"><Trash2 className="w-3.5 h-3.5 text-[var(--danger)]" /></button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
