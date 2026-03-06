@@ -1,12 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { Play, Loader2, Trash2 } from "lucide-react";
-import { proxyUrl } from "@/lib/api";
+import { Play, Loader2, Trash2, AlertCircle } from "lucide-react";
 
 interface Props {
   sandboxId: string;
   port?: number;
+  apiBase?: string;
 }
 
 const LANGUAGES = [
@@ -19,85 +19,97 @@ const LANGUAGES = [
 ];
 
 const EXAMPLES: Record<string, string> = {
-  python: 'import sys\nprint(f"Python {sys.version}")\nprint("Hello from sandbox!")\n\nfor i in range(5):\n    print(f"  {i}: {i**2}")',
-  javascript: 'console.log(`Node.js ${process.version}`);\nconsole.log("Hello from sandbox!");\n\nfor (let i = 0; i < 5; i++) {\n  console.log(`  ${i}: ${i**2}`);\n}',
+  python: 'import sys\nprint(f"Python {sys.version}")\nfor i in range(5):\n    print(f"  {i}: {i**2}")',
+  javascript: 'console.log("Node.js " + process.version);\nfor (let i = 0; i < 5; i++) {\n  console.log("  " + i + ": " + i*i);\n}',
   typescript: 'const greet = (name: string): string => `Hello, ${name}!`;\nconsole.log(greet("Sandbox"));',
-  java: 'public class Main {\n    public static void main(String[] args) {\n        System.out.println("Hello from Java sandbox!");\n    }\n}',
-  go: 'package main\n\nimport "fmt"\n\nfunc main() {\n    fmt.Println("Hello from Go sandbox!")\n}',
-  bash: '#!/bin/bash\necho "Hello from Bash!"\necho "Hostname: $(hostname)"\necho "Working dir: $(pwd)"\nls -la /',
+  java: 'public class Main {\n    public static void main(String[] args) {\n        System.out.println("Hello from Java!");\n    }\n}',
+  go: 'package main\nimport "fmt"\nfunc main() {\n    fmt.Println("Hello from Go!")\n}',
+  bash: 'echo "Hello from Bash!"\necho "Hostname: $(hostname)"\necho "PWD: $(pwd)"\nls -la /',
 };
 
-export function CodeRunner({ sandboxId, port = 44772 }: Props) {
-  const [language, setLanguage] = useState("python");
+export function CodeRunner({ sandboxId, port = 44772, apiBase }: Props) {
+  const base = apiBase || process.env.NEXT_PUBLIC_API_URL || "/api/proxy";
+  const [lang, setLang] = useState("python");
   const [code, setCode] = useState(EXAMPLES.python);
   const [output, setOutput] = useState("");
   const [error, setError] = useState("");
   const [running, setRunning] = useState(false);
+  const [connError, setConnError] = useState("");
 
-  const handleLanguageChange = (lang: string) => {
-    setLanguage(lang);
-    if (EXAMPLES[lang] && !code.trim()) setCode(EXAMPLES[lang]);
+  const changeLang = (l: string) => {
+    setLang(l);
+    setCode(EXAMPLES[l] || "");
+    setOutput("");
+    setError("");
   };
 
   const runCode = async () => {
+    if (!code.trim() || running) return;
     setRunning(true);
     setOutput("");
     setError("");
+    setConnError("");
 
     try {
-      const url = proxyUrl(sandboxId, port, "code");
-      const response = await fetch(url, {
+      const url = `${base}/sandboxes/${sandboxId}/proxy/${port}/code`;
+      const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code, language }),
+        body: JSON.stringify({ code, language: lang }),
       });
 
-      if (!response.ok) {
-        const errText = await response.text();
-        setError(errText);
+      if (!res.ok) {
+        const text = await res.text().catch(() => `HTTP ${res.status}`);
+        setError(text);
+        if (res.status === 502 || res.status === 404) {
+          setConnError("Cannot reach sandbox code interpreter");
+        }
         setRunning(false);
         return;
       }
 
-      const reader = response.body?.getReader();
-      const decoder = new TextDecoder();
-      let out = "";
-      let err = "";
-
-      if (reader) {
+      const contentType = res.headers.get("content-type") || "";
+      if (contentType.includes("text/event-stream")) {
+        const reader = res.body?.getReader();
+        if (!reader) { setRunning(false); return; }
+        const decoder = new TextDecoder();
+        let out = "", err = "";
+        let buffer = "";
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
-          const chunk = decoder.decode(value, { stream: true });
-          for (const line of chunk.split("\n")) {
-            if (line.startsWith("data: ")) {
-              try {
-                const data = JSON.parse(line.slice(6));
-                if (data.output_type === "stdout" || data.type === "stdout") {
-                  out += data.data || data.output || "";
-                } else if (data.output_type === "stderr" || data.type === "stderr") {
-                  err += data.data || data.output || "";
-                } else if (data.output_type === "result") {
-                  out += data.data || "";
-                } else if (data.output) {
-                  out += data.output;
-                }
-              } catch {
-                out += line.slice(6) + "\n";
-              }
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() || "";
+          for (const line of lines) {
+            if (!line.startsWith("data: ")) continue;
+            try {
+              const d = JSON.parse(line.slice(6));
+              const txt = d.data || d.output || d.text || "";
+              if (d.output_type === "stderr" || d.type === "stderr") err += txt;
+              else out += txt;
+            } catch {
+              out += line.slice(6) + "\n";
             }
           }
           setOutput(out);
           setError(err);
         }
+        setOutput(out);
+        setError(err);
       } else {
-        out = await response.text();
+        const text = await res.text();
+        try {
+          const j = JSON.parse(text);
+          setOutput(j.stdout || j.output || j.result || text);
+          if (j.stderr) setError(j.stderr);
+        } catch {
+          setOutput(text);
+        }
       }
-
-      setOutput(out);
-      setError(err);
     } catch (e: any) {
-      setError(`Connection error: ${e.message}`);
+      setError(e.message);
+      setConnError("Network error");
     } finally {
       setRunning(false);
     }
@@ -105,43 +117,36 @@ export function CodeRunner({ sandboxId, port = 44772 }: Props) {
 
   return (
     <div className="space-y-4">
+      {connError && (
+        <div className="flex items-center gap-2 p-3 rounded-lg bg-[#f8514926] text-[#f85149] text-sm">
+          <AlertCircle className="w-4 h-4" /> {connError}
+        </div>
+      )}
       <div className="flex items-center gap-3">
-        <select value={language} onChange={(e) => handleLanguageChange(e.target.value)}
-          className="min-w-[140px]">
+        <select value={lang} onChange={(e) => changeLang(e.target.value)} className="min-w-[140px]">
           {LANGUAGES.map((l) => <option key={l.value} value={l.value}>{l.label}</option>)}
         </select>
-        <button onClick={runCode} disabled={running || !code.trim()}
-          className="btn btn-primary">
+        <button onClick={runCode} disabled={running || !code.trim()} className="btn btn-primary">
           {running ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
           {running ? "Running..." : "Run"}
         </button>
-        <button onClick={() => { setCode(""); setOutput(""); setError(""); }}
-          className="btn btn-ghost">
+        <button onClick={() => { setCode(""); setOutput(""); setError(""); }} className="btn btn-ghost">
           <Trash2 className="w-4 h-4" /> Clear
         </button>
       </div>
-
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div>
           <p className="text-xs font-semibold text-[var(--text-secondary)] mb-2 uppercase">Code</p>
-          <textarea
-            value={code}
-            onChange={(e) => setCode(e.target.value)}
-            className="w-full h-[350px] bg-[#0d1117] text-[#c9d1d9] border border-[var(--border)] rounded-lg p-4 font-mono text-sm resize-none"
-            spellCheck={false}
-          />
+          <textarea value={code} onChange={(e) => setCode(e.target.value)} spellCheck={false}
+            className="w-full h-[400px] bg-[#0d1117] text-[#c9d1d9] border border-[var(--border)] rounded-lg p-4 font-mono text-sm resize-none" />
         </div>
         <div>
           <p className="text-xs font-semibold text-[var(--text-secondary)] mb-2 uppercase">Output</p>
-          <div className="w-full h-[350px] bg-[#0d1117] border border-[var(--border)] rounded-lg p-4 font-mono text-sm overflow-auto">
+          <div className="w-full h-[400px] bg-[#0d1117] border border-[var(--border)] rounded-lg p-4 font-mono text-sm overflow-auto">
             {output && <pre className="text-[#c9d1d9] whitespace-pre-wrap">{output}</pre>}
-            {error && <pre className="text-[#f85149] whitespace-pre-wrap">{error}</pre>}
-            {!output && !error && !running && (
-              <span className="text-[#484f58]">Output will appear here...</span>
-            )}
-            {running && !output && !error && (
-              <span className="text-[#484f58] animate-pulse">Executing...</span>
-            )}
+            {error && <pre className="text-[#f85149] whitespace-pre-wrap mt-1">{error}</pre>}
+            {!output && !error && !running && <span className="text-[#484f58]">Click Run to execute code...</span>}
+            {running && !output && !error && <span className="text-[#484f58] animate-pulse">Executing...</span>}
           </div>
         </div>
       </div>

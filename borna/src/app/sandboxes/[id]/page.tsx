@@ -5,7 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import {
   ArrowLeft, Trash2, Pause, Play, Clock, Camera, Copy, Share2,
-  Heart, Shield, Globe, RefreshCw, Timer,
+  Heart, Shield, Globe, RefreshCw, Timer, Loader2,
 } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
 import {
@@ -19,6 +19,7 @@ import {
 import { SandboxTerminal } from "@/components/sandbox-terminal";
 import { CodeRunner } from "@/components/code-runner";
 import { VncViewer } from "@/components/vnc-viewer";
+import { FileBrowser } from "@/components/file-browser";
 
 export default function SandboxDetailPage() {
   const params = useParams();
@@ -34,7 +35,7 @@ export default function SandboxDetailPage() {
   const [endpoint, setEndpoint] = useState<Endpoint | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [tab, setTab] = useState<"overview" | "terminal" | "code" | "snapshots" | "shares" | "extensions" | "vnc" | "endpoints">("overview");
+  const [tab, setTab] = useState<"overview" | "terminal" | "code" | "files" | "snapshots" | "shares" | "extensions" | "vnc" | "endpoints">("overview");
 
   const fetchAll = async () => {
     try {
@@ -138,7 +139,10 @@ export default function SandboxDetailPage() {
 
   const [availableExtensions, setAvailableExtensions] = useState<ExtensionInfo[]>([]);
   const [selectedExtensions, setSelectedExtensions] = useState<string[]>([]);
+  const [installedExtensions, setInstalledExtensions] = useState<string[]>([]);
   const [extensionScript, setExtensionScript] = useState("");
+  const [installing, setInstalling] = useState(false);
+  const [installLog, setInstallLog] = useState("");
 
   const handleViewSnapshot = async (snapId: string) => {
     try {
@@ -151,13 +155,46 @@ export default function SandboxDetailPage() {
     try { setAvailableExtensions(await listExtensions()); } catch { /* ignore */ }
   };
 
+  const apiBase = process.env.NEXT_PUBLIC_API_URL || "/api/proxy";
+
   const handleApplyExtensions = async () => {
     if (selectedExtensions.length === 0) { alert("Select at least one extension"); return; }
+    setInstalling(true);
+    setInstallLog("Generating setup script...\n");
     try {
       const result = await applyExtensions(id, selectedExtensions);
       setExtensionScript(result.setup_script);
-      alert(`Extensions ready! Setup script generated for: ${selectedExtensions.join(", ")}`);
-    } catch (e: any) { alert(e.message); }
+      setInstallLog((p) => p + "Executing setup script inside sandbox...\n");
+
+      const url = `${apiBase}/sandboxes/${id}/proxy/${44772}/command`;
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          command: `bash -c '${result.setup_script.replace(/'/g, "'\\''")}'`,
+          timeout: 120,
+          background: false,
+        }),
+      });
+
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        setInstallLog((p) => p + `Installation failed: ${text}\n`);
+      } else {
+        const text = await res.text();
+        setInstallLog((p) => p + text + "\nInstallation complete!\n");
+        setInstalledExtensions((prev) => [...new Set([...prev, ...selectedExtensions])]);
+        setSelectedExtensions([]);
+      }
+    } catch (e: any) {
+      setInstallLog((p) => p + `Error: ${e.message}\n`);
+    } finally {
+      setInstalling(false);
+    }
+  };
+
+  const handleRemoveExtension = (extId: string) => {
+    setInstalledExtensions((prev) => prev.filter((e) => e !== extId));
   };
 
   const toggleExtension = (extId: string) => {
@@ -184,6 +221,7 @@ export default function SandboxDetailPage() {
     { key: "overview", label: "Overview" },
     { key: "terminal", label: "Terminal" },
     { key: "code", label: "Code" },
+    { key: "files", label: "Files" },
     { key: "snapshots", label: `Snapshots (${snapshots.length})` },
     { key: "shares", label: `Shares (${shares.length})` },
     { key: "extensions", label: "Extensions" },
@@ -381,44 +419,70 @@ export default function SandboxDetailPage() {
           </div>
         )}
 
-        {tab === "extensions" && (
+        {tab === "files" && (
           <div className="space-y-4">
             <p className="text-sm text-[var(--text-secondary)]">
-              Install tools and services into this sandbox.
+              Browse, upload, download, and manage files inside the sandbox.
             </p>
+            <FileBrowser sandboxId={id} />
+          </div>
+        )}
+
+        {tab === "extensions" && (
+          <div className="space-y-4">
+            {installedExtensions.length > 0 && (
+              <div className="card">
+                <h3 className="font-semibold mb-3">Installed Extensions</h3>
+                <div className="flex flex-wrap gap-2">
+                  {installedExtensions.map((extId) => {
+                    const ext = availableExtensions.find((e) => e.id === extId);
+                    return (
+                      <div key={extId} className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[var(--success)] bg-opacity-10 border border-[var(--success)] border-opacity-30">
+                        <span className="text-sm font-medium text-[var(--success)]">{ext?.name || extId}</span>
+                        <button onClick={() => handleRemoveExtension(extId)} className="text-[var(--text-secondary)] hover:text-[var(--danger)]">
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
             {availableExtensions.length === 0 ? (
               <button onClick={loadExtensions} className="btn btn-primary">Load Available Extensions</button>
             ) : (
               <>
+                <h3 className="font-semibold">Available Extensions</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                  {availableExtensions.map((ext) => (
-                    <div
-                      key={ext.id}
-                      onClick={() => toggleExtension(ext.id)}
-                      className={`card cursor-pointer p-3 transition-all ${selectedExtensions.includes(ext.id) ? "border-[var(--accent)] bg-[var(--accent)] bg-opacity-5" : ""}`}
-                    >
+                  {availableExtensions.filter((e) => !installedExtensions.includes(e.id)).map((ext) => (
+                    <div key={ext.id} onClick={() => toggleExtension(ext.id)}
+                      className={`card cursor-pointer p-3 transition-all ${selectedExtensions.includes(ext.id) ? "border-[var(--accent)] bg-[var(--accent)] bg-opacity-5" : ""}`}>
                       <div className="flex items-center gap-2">
                         <input type="checkbox" checked={selectedExtensions.includes(ext.id)} readOnly className="accent-[var(--accent)]" />
                         <div>
                           <p className="font-medium text-sm">{ext.name}</p>
                           <p className="text-xs text-[var(--text-secondary)]">{ext.description}</p>
+                          <div className="flex gap-1 mt-1">
+                            {ext.tags.slice(0, 3).map((t) => (
+                              <span key={t} className="px-1.5 py-0.5 rounded text-[10px] bg-[var(--bg-secondary)] text-[var(--text-secondary)]">{t}</span>
+                            ))}
+                          </div>
                         </div>
                       </div>
                     </div>
                   ))}
                 </div>
                 {selectedExtensions.length > 0 && (
-                  <button onClick={handleApplyExtensions} className="btn btn-primary">
-                    Apply {selectedExtensions.length} Extension{selectedExtensions.length > 1 ? "s" : ""}
+                  <button onClick={handleApplyExtensions} disabled={installing} className="btn btn-primary">
+                    {installing ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                    {installing ? "Installing..." : `Install ${selectedExtensions.length} Extension${selectedExtensions.length > 1 ? "s" : ""}`}
                   </button>
                 )}
-                {extensionScript && (
+                {installLog && (
                   <div className="card">
-                    <h3 className="font-semibold mb-2">Setup Script</h3>
-                    <pre className="text-xs bg-[#0d1117] text-[#c9d1d9] p-4 rounded-lg overflow-x-auto max-h-60">{extensionScript}</pre>
-                    <p className="text-xs text-[var(--text-secondary)] mt-2">
-                      Run this script in the Terminal tab, or copy and execute manually.
-                    </p>
+                    <h3 className="font-semibold mb-2">Installation Log</h3>
+                    <pre className="text-xs bg-[#0d1117] text-[#c9d1d9] p-4 rounded-lg overflow-auto max-h-60 font-mono">{installLog}</pre>
                   </div>
                 )}
               </>
