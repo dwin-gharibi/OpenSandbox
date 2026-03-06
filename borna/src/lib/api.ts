@@ -513,6 +513,61 @@ export const applyExtensions = (sandboxId: string, extensions: string[]) =>
     { method: "POST", body: JSON.stringify({ extensions }) },
   );
 
+// --- Provisioning Scripts ---
+export interface ProvisioningScriptInfo {
+  id: string;
+  name: string;
+  description: string;
+  script: string;
+  language: string;
+  category: string;
+  tags: string[];
+  env: Record<string, string>;
+  timeoutSeconds: number;
+  runOnCreate: boolean;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const listProvisioningScripts = (params?: { category?: string; tag?: string; q?: string }) => {
+  const query = new URLSearchParams();
+  if (params?.category) query.set("category", params.category);
+  if (params?.tag) query.set("tag", params.tag);
+  if (params?.q) query.set("q", params.q);
+  return apiFetch<ProvisioningScriptInfo[]>(`/provisioning-scripts?${query.toString()}`);
+};
+
+export const getProvisioningScript = (id: string) =>
+  apiFetch<ProvisioningScriptInfo>(`/provisioning-scripts/${id}`);
+
+export const createProvisioningScript = (data: {
+  name: string; description?: string; script: string; language?: string;
+  category?: string; tags?: string[]; env?: Record<string, string>;
+  timeoutSeconds?: number; runOnCreate?: boolean;
+}) => apiFetch<ProvisioningScriptInfo>("/provisioning-scripts", {
+  method: "POST", body: JSON.stringify(data),
+});
+
+export const updateProvisioningScript = (id: string, data: {
+  name?: string; description?: string; script?: string;
+  category?: string; tags?: string[]; env?: Record<string, string>;
+  timeoutSeconds?: number; runOnCreate?: boolean;
+}) => apiFetch<ProvisioningScriptInfo>(`/provisioning-scripts/${id}`, {
+  method: "PUT", body: JSON.stringify(data),
+});
+
+export const deleteProvisioningScript = (id: string) =>
+  apiFetch<void>(`/provisioning-scripts/${id}`, { method: "DELETE" });
+
+export const getProvisioningCategories = () =>
+  apiFetch<string[]>("/provisioning-scripts/categories");
+
+export const runProvisioningOnSandbox = (sandboxId: string, scriptId: string) =>
+  apiFetch<{ sandbox_id: string; script_id: string; script_name: string; script: string; env: Record<string, string>; timeout_seconds: number }>(
+    `/sandboxes/${sandboxId}/provision?scriptId=${scriptId}`, { method: "POST" },
+  );
+
 // --- Proxy helpers for execd (commands, code, files) ---
 export const proxyUrl = (sandboxId: string, port: number, path: string) =>
   `${API_BASE}/sandboxes/${sandboxId}/proxy/${port}/${path}`;
