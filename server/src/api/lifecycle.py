@@ -114,7 +114,21 @@ async def create_sandbox(
         HTTPException: If sandbox creation scheduling fails
     """
 
-    return sandbox_service.create_sandbox(request)
+    result = sandbox_service.create_sandbox(request)
+
+    from src.services.event_bus import EventType, SandboxEvent, get_event_bus
+    from src.services.health_monitor import get_health_monitor
+
+    bus = get_event_bus()
+    bus.publish(SandboxEvent(
+        event_type=EventType.SANDBOX_CREATED,
+        sandbox_id=result.id,
+        actor=x_request_id or "",
+        data={"image": request.image.uri},
+    ))
+    get_health_monitor().set_health_status(result.id, "unknown")
+
+    return result
 
 
 # Search endpoint
@@ -285,8 +299,18 @@ async def delete_sandbox(
     Raises:
         HTTPException: If sandbox not found or deletion fails
     """
-    # Delegate to the service layer for deletion
     sandbox_service.delete_sandbox(sandbox_id)
+
+    from src.services.event_bus import EventType, SandboxEvent, get_event_bus
+    from src.services.health_monitor import get_health_monitor
+
+    bus = get_event_bus()
+    bus.publish(SandboxEvent(
+        event_type=EventType.SANDBOX_DELETED,
+        sandbox_id=sandbox_id,
+    ))
+    get_health_monitor().remove_sandbox(sandbox_id)
+
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -338,8 +362,11 @@ async def pause_sandbox(
     Raises:
         HTTPException: If sandbox not found or cannot be paused
     """
-    # Delegate to the service layer for pause orchestration
     sandbox_service.pause_sandbox(sandbox_id)
+
+    from src.services.event_bus import EventType, SandboxEvent, get_event_bus
+    get_event_bus().publish(SandboxEvent(event_type=EventType.SANDBOX_PAUSED, sandbox_id=sandbox_id))
+
     return Response(status_code=status.HTTP_202_ACCEPTED)
 
 
@@ -386,8 +413,11 @@ async def resume_sandbox(
     Raises:
         HTTPException: If sandbox not found or cannot be resumed
     """
-    # Delegate to the service layer for resume orchestration
     sandbox_service.resume_sandbox(sandbox_id)
+
+    from src.services.event_bus import EventType, SandboxEvent, get_event_bus
+    get_event_bus().publish(SandboxEvent(event_type=EventType.SANDBOX_RESUMED, sandbox_id=sandbox_id))
+
     return Response(status_code=status.HTTP_202_ACCEPTED)
 
 

@@ -134,14 +134,7 @@ class EventBus:
                 self._dispatch_webhook(webhook, event)
 
     def _dispatch_webhook(self, webhook: Dict[str, Any], event: SandboxEvent) -> None:
-        try:
-            loop = asyncio.get_running_loop()
-            loop.create_task(self._send_webhook(webhook, event))
-        except RuntimeError:
-            pass
-
-    async def _send_webhook(self, webhook: Dict[str, Any], event: SandboxEvent) -> None:
-        import httpx
+        import threading
 
         payload = {
             "id": event.id,
@@ -151,18 +144,29 @@ class EventBus:
             "actor": event.actor,
             "data": event.data,
         }
-        try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                headers = {"Content-Type": "application/json"}
-                if webhook.get("secret"):
-                    import hashlib
-                    import json
+        t = threading.Thread(
+            target=self._send_webhook_sync, args=(webhook, payload), daemon=True
+        )
+        t.start()
 
-                    sig = hashlib.sha256(
-                        (webhook["secret"] + json.dumps(payload, sort_keys=True)).encode()
-                    ).hexdigest()
-                    headers["X-Webhook-Signature"] = sig
-                await client.post(webhook["url"], json=payload, headers=headers)
+    @staticmethod
+    def _send_webhook_sync(webhook: Dict[str, Any], payload: Dict[str, Any]) -> None:
+        import hashlib
+        import json
+        import urllib.request
+
+        try:
+            data = json.dumps(payload).encode("utf-8")
+            headers = {"Content-Type": "application/json"}
+            if webhook.get("secret"):
+                sig = hashlib.sha256(
+                    (webhook["secret"] + json.dumps(payload, sort_keys=True)).encode()
+                ).hexdigest()
+                headers["X-Webhook-Signature"] = sig
+            req = urllib.request.Request(
+                webhook["url"], data=data, headers=headers, method="POST"
+            )
+            urllib.request.urlopen(req, timeout=10)
         except Exception:
             logger.warning("Webhook delivery failed to %s", webhook["url"])
 

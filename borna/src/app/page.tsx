@@ -85,11 +85,12 @@ export default function DashboardPage() {
 
         {data && (
           <>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
               <StatCard title="Total Sandboxes" value={data.total_sandboxes} icon={Box} color="info" />
-              <StatCard title="Healthy" value={data.healthy} icon={Heart} color="success" />
-              <StatCard title="Unhealthy" value={data.unhealthy} icon={XCircle} color="danger" />
-              <StatCard title="Degraded" value={data.degraded} icon={AlertTriangle} color="warning" />
+              <StatCard title="Running" value={data.running || 0} icon={Heart} color="success" />
+              <StatCard title="Paused" value={data.paused || 0} icon={Clock} color="warning" />
+              <StatCard title="Pending" value={data.pending || 0} icon={AlertTriangle} color="default" />
+              <StatCard title="Failed" value={data.failed || 0} icon={XCircle} color="danger" />
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -124,17 +125,26 @@ export default function DashboardPage() {
                 <div className="table-container">
                   <table>
                     <thead>
-                      <tr><th>Sandbox ID</th><th>Status</th><th>Response Time</th><th>CPU</th><th>Memory</th><th>Last Check</th></tr>
+                      <tr><th>Sandbox ID</th><th>Image</th><th>State</th><th>CPU</th><th>Memory</th><th>Created</th><th>Expires</th></tr>
                     </thead>
                     <tbody>
                       {data.sandboxes.map((s) => (
                         <tr key={s.sandbox_id}>
-                          <td className="font-mono text-sm">{s.sandbox_id.slice(0, 12)}...</td>
-                          <td><span className={`badge badge-${s.status}`}>{s.status}</span></td>
-                          <td>{s.response_time_ms}ms</td>
+                          <td>
+                            <a href={`/sandboxes/${s.sandbox_id}`} className="font-mono text-sm text-[var(--accent)] hover:underline">
+                              {s.sandbox_id.slice(0, 12)}...
+                            </a>
+                          </td>
+                          <td className="font-mono text-sm">{s.image || "-"}</td>
+                          <td>
+                            <span className={`badge ${s.state === "Running" ? "badge-healthy" : s.state === "Failed" ? "badge-unhealthy" : s.state === "Paused" ? "badge-degraded" : "badge-unknown"}`}>
+                              {s.state || s.status}
+                            </span>
+                          </td>
                           <td>{s.cpu_percent}%</td>
                           <td>{s.memory_percent}%</td>
-                          <td className="text-[var(--text-secondary)]">{new Date(s.last_check).toLocaleTimeString()}</td>
+                          <td className="text-[var(--text-secondary)] text-sm">{s.created_at ? new Date(s.created_at).toLocaleString() : "-"}</td>
+                          <td className="text-[var(--text-secondary)] text-sm">{s.expires_at ? new Date(s.expires_at).toLocaleString() : "-"}</td>
                         </tr>
                       ))}
                     </tbody>

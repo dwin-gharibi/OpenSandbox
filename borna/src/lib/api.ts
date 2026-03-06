@@ -257,6 +257,10 @@ export interface ShareValidation {
 
 export interface DashboardData {
   total_sandboxes: number;
+  running: number;
+  paused: number;
+  failed: number;
+  pending: number;
   healthy: number;
   unhealthy: number;
   degraded: number;
@@ -271,11 +275,15 @@ export interface DashboardData {
 
 export interface SandboxHealthInfo {
   sandbox_id: string;
+  image?: string;
+  state?: string;
   status: string;
   last_check: string;
   response_time_ms: number;
   cpu_percent: number;
   memory_percent: number;
+  created_at?: string;
+  expires_at?: string;
 }
 
 export interface SandboxHealth {
@@ -472,3 +480,69 @@ export const getSandboxHealth = (sandboxId: string) =>
 // --- Auto-Extend ---
 export const getAutoExtend = (sandboxId: string) =>
   apiFetch<AutoExtendStats>(`/sandboxes/${sandboxId}/auto-extend`);
+
+// --- Extensions ---
+export interface ExtensionInfo {
+  id: string;
+  name: string;
+  description: string;
+  category: string;
+  icon: string;
+  tags: string[];
+  ports: number[];
+  env: Record<string, string>;
+  packages: string[];
+  resource_hints: Record<string, string>;
+  setup_commands?: string[];
+}
+
+export const listExtensions = (params?: { category?: string; q?: string }) => {
+  const query = new URLSearchParams();
+  if (params?.category) query.set("category", params.category);
+  if (params?.q) query.set("q", params.q);
+  return apiFetch<ExtensionInfo[]>(`/extensions?${query.toString()}`);
+};
+
+export const getExtension = (id: string) => apiFetch<ExtensionInfo>(`/extensions/${id}`);
+
+export const getExtensionCategories = () => apiFetch<string[]>("/extensions/categories");
+
+export const applyExtensions = (sandboxId: string, extensions: string[]) =>
+  apiFetch<{ sandbox_id: string; extensions: string[]; setup_script: string; env: Record<string, string>; ports: number[] }>(
+    `/sandboxes/${sandboxId}/extensions`,
+    { method: "POST", body: JSON.stringify({ extensions }) },
+  );
+
+// --- Proxy helpers for execd (commands, code, files) ---
+export const proxyUrl = (sandboxId: string, port: number, path: string) =>
+  `${API_BASE}/sandboxes/${sandboxId}/proxy/${port}/${path}`;
+
+export const execCommand = (sandboxId: string, port: number, command: string, timeout = 30) =>
+  fetch(proxyUrl(sandboxId, port, "command"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ command, timeout, background: false }),
+  });
+
+export const execCode = (sandboxId: string, port: number, code: string, language: string) =>
+  fetch(proxyUrl(sandboxId, port, "code"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ code, language }),
+  });
+
+export const listFiles = (sandboxId: string, port: number, path: string) =>
+  fetch(proxyUrl(sandboxId, port, `files/info?path=${encodeURIComponent(path)}`))
+    .then((r) => r.json());
+
+export const downloadFile = (sandboxId: string, port: number, path: string) =>
+  fetch(proxyUrl(sandboxId, port, `files/download?path=${encodeURIComponent(path)}`));
+
+export const uploadFiles = (sandboxId: string, port: number, formData: FormData) =>
+  fetch(proxyUrl(sandboxId, port, "files/upload"), { method: "POST", body: formData });
+
+export const getMetricsFromSandbox = (sandboxId: string, port: number) =>
+  fetch(proxyUrl(sandboxId, port, "metrics")).then((r) => r.json());
+
+export const pingSandbox = (sandboxId: string, port: number) =>
+  fetch(proxyUrl(sandboxId, port, "ping")).then((r) => r.json());
