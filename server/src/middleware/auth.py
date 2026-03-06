@@ -39,7 +39,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
     API_KEY_HEADER = "OPEN-SANDBOX-API-KEY"
 
     # Paths that don't require authentication
-    EXEMPT_PATHS = ["/health", "/docs", "/redoc", "/openapi.json"]
+    EXEMPT_PATHS = ["/health", "/docs", "/redoc", "/openapi.json", "/metrics/prometheus"]
 
     # Strict pattern for proxy-to-sandbox: /sandboxes/{id}/proxy/{port}/... with numeric port only.
     # Matches the actual route in lifecycle.py; rejects path traversal (..) and malformed port.
