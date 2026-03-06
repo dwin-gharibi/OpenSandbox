@@ -80,7 +80,7 @@ export default function AuditPage() {
             <>
               <div className="table-container">
                 <table>
-                  <thead><tr><th>Timestamp</th><th>Actor</th><th>Action</th><th>Resource</th><th>Outcome</th><th>Details</th></tr></thead>
+                  <thead><tr><th>Timestamp</th><th>Actor</th><th>Action</th><th>Resource</th><th>Outcome</th><th>IP</th><th>Request ID</th><th>Details</th></tr></thead>
                   <tbody>
                     {entries.map((entry) => (
                       <tr key={entry.id}>
@@ -89,6 +89,8 @@ export default function AuditPage() {
                         <td><span className={`font-medium ${actionColor[entry.action] || ""}`}>{entry.action}</span></td>
                         <td className="font-mono text-sm">{entry.resource_id ? entry.resource_id.slice(0, 12) : "-"}</td>
                         <td><span className={`badge ${entry.outcome === "success" ? "badge-healthy" : "badge-unhealthy"}`}>{entry.outcome}</span></td>
+                        <td className="font-mono text-sm text-[var(--text-secondary)]">{entry.ip_address || "-"}</td>
+                        <td className="font-mono text-sm text-[var(--text-secondary)]">{entry.request_id ? entry.request_id.slice(0, 8) : "-"}</td>
                         <td className="text-sm text-[var(--text-secondary)] max-w-[200px] truncate">{JSON.stringify(entry.details)}</td>
                       </tr>
                     ))}

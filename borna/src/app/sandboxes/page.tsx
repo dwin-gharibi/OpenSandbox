@@ -26,13 +26,14 @@ export default function SandboxesPage() {
   const [pagination, setPagination] = useState<PaginationInfo | null>(null);
   const [page, setPage] = useState(1);
   const [stateFilter, setStateFilter] = useState<string>("");
+  const [metadataFilter, setMetadataFilter] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   const fetchSandboxes = async () => {
     try {
       const states = stateFilter ? [stateFilter] : undefined;
-      const res = await listSandboxes({ state: states, page, pageSize: 20 });
+      const res = await listSandboxes({ state: states, metadata: metadataFilter || undefined, page, pageSize: 20 });
       setSandboxes(res.items);
       setPagination(res.pagination);
       setError("");
@@ -45,7 +46,7 @@ export default function SandboxesPage() {
 
   useEffect(() => {
     fetchSandboxes();
-  }, [page, stateFilter]);
+  }, [page, stateFilter, metadataFilter]);
 
   const handleDelete = async (id: string) => {
     if (!confirm(`Delete sandbox ${id.slice(0, 12)}...?`)) return;
@@ -117,8 +118,15 @@ export default function SandboxesPage() {
             <option value="Terminated">Terminated</option>
             <option value="Failed">Failed</option>
           </select>
+          <input
+            type="text"
+            placeholder="Metadata filter (key=value&key2=value2)"
+            value={metadataFilter}
+            onChange={(e) => { setMetadataFilter(e.target.value); setPage(1); }}
+            className="flex-1 min-w-[200px]"
+          />
           {pagination && (
-            <span className="text-sm text-[var(--text-secondary)]">
+            <span className="text-sm text-[var(--text-secondary)] whitespace-nowrap">
               {pagination.totalItems} sandbox{pagination.totalItems !== 1 ? "es" : ""}
             </span>
           )}

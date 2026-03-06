@@ -317,9 +317,10 @@ export const checkHealth = () => apiFetch<{ status: string }>("/health");
 export const createSandbox = (req: CreateSandboxRequest) =>
   apiFetch<CreateSandboxResponse>("/sandboxes", { method: "POST", body: JSON.stringify(req) });
 
-export const listSandboxes = (params?: { state?: string[]; page?: number; pageSize?: number }) => {
+export const listSandboxes = (params?: { state?: string[]; metadata?: string; page?: number; pageSize?: number }) => {
   const q = new URLSearchParams();
   if (params?.state) params.state.forEach((s) => q.append("state", s));
+  if (params?.metadata) q.set("metadata", params.metadata);
   if (params?.page) q.set("page", String(params.page));
   if (params?.pageSize) q.set("pageSize", String(params.pageSize));
   return apiFetch<ListSandboxesResponse>(`/sandboxes?${q.toString()}`);

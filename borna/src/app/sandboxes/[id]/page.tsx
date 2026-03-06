@@ -11,7 +11,7 @@ import { AppShell } from "@/components/app-shell";
 import {
   getSandbox, deleteSandbox, pauseSandbox, resumeSandbox, renewExpiration,
   getEndpoint, getSandboxHealth, getSandboxCost, getAutoExtend,
-  createSnapshot, listSnapshots, deleteSnapshot, cloneSandbox,
+  createSnapshot, listSnapshots, getSnapshot, deleteSnapshot, cloneSandbox,
   createShare, listShares, revokeShare,
   type Sandbox, type SandboxHealth, type SandboxCost, type AutoExtendStats,
   type SnapshotInfo, type ShareInfo, type Endpoint,
@@ -106,11 +106,37 @@ export default function SandboxDetailPage() {
     try { const res = await cloneSandbox(id); alert(`Clone created: ${res.id.slice(0, 12)}...`); } catch (e: any) { alert(e.message); }
   };
 
+  const [showShareForm, setShowShareForm] = useState(false);
+  const [sharePerms, setSharePerms] = useState<string[]>(["read"]);
+  const [shareLabel, setShareLabel] = useState("");
+  const [shareExpiry, setShareExpiry] = useState("");
+  const [shareMaxUses, setShareMaxUses] = useState("");
+  const [createdShareToken, setCreatedShareToken] = useState("");
+  const [selectedSnapshot, setSelectedSnapshot] = useState<SnapshotInfo | null>(null);
+
+  const toggleSharePerm = (p: string) =>
+    setSharePerms((prev) => prev.includes(p) ? prev.filter((x) => x !== p) : [...prev, p]);
+
   const handleShare = async () => {
     try {
-      const res = await createShare(id, ["read", "write"], "Shared via Borna");
-      prompt("Share token (copy it):", res.token);
+      const res = await createShare(
+        id, sharePerms, shareLabel,
+        shareExpiry ? Number(shareExpiry) : undefined,
+        shareMaxUses ? Number(shareMaxUses) : undefined,
+      );
+      setCreatedShareToken(res.token);
+      setShowShareForm(false);
+      setShareLabel("");
+      setShareExpiry("");
+      setShareMaxUses("");
       fetchAll();
+    } catch (e: any) { alert(e.message); }
+  };
+
+  const handleViewSnapshot = async (snapId: string) => {
+    try {
+      const snap = await getSnapshot(snapId);
+      setSelectedSnapshot(snap);
     } catch (e: any) { alert(e.message); }
   };
 
@@ -220,6 +246,17 @@ export default function SandboxDetailPage() {
               <button onClick={handleSnapshot} className="btn btn-primary"><Camera className="w-4 h-4" /> Create Snapshot</button>
               <button onClick={handleClone} className="btn btn-ghost"><Copy className="w-4 h-4" /> Clone Sandbox</button>
             </div>
+            {selectedSnapshot && (
+              <div className="card">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="font-semibold">Snapshot Detail</h3>
+                  <button onClick={() => setSelectedSnapshot(null)} className="btn btn-ghost p-1 text-xs">Close</button>
+                </div>
+                {[["ID", selectedSnapshot.id], ["Sandbox", selectedSnapshot.sandbox_id], ["Image Tag", selectedSnapshot.image_tag], ["Size", `${selectedSnapshot.size_bytes} bytes`], ["Description", selectedSnapshot.description || "-"], ["Created", new Date(selectedSnapshot.created_at).toLocaleString()]].map(([k, v]) => (
+                  <div key={String(k)} className="flex justify-between text-sm py-1"><span className="text-[var(--text-secondary)]">{k}</span><span className="font-mono text-right max-w-[60%] truncate">{v}</span></div>
+                ))}
+              </div>
+            )}
             {snapshots.length === 0 ? (
               <div className="card text-[var(--text-secondary)] text-center py-8">No snapshots yet</div>
             ) : (
@@ -229,7 +266,7 @@ export default function SandboxDetailPage() {
                   <tbody>
                     {snapshots.map((s) => (
                       <tr key={s.id}>
-                        <td className="font-mono text-sm">{s.id.slice(0, 12)}</td>
+                        <td className="font-mono text-sm cursor-pointer text-[var(--accent)] hover:underline" onClick={() => handleViewSnapshot(s.id)}>{s.id.slice(0, 12)}</td>
                         <td className="font-mono text-sm">{s.image_tag}</td>
                         <td>{s.description || "-"}</td>
                         <td className="text-[var(--text-secondary)]">{new Date(s.created_at).toLocaleString()}</td>
@@ -245,7 +282,33 @@ export default function SandboxDetailPage() {
 
         {tab === "shares" && (
           <div className="space-y-4">
-            <button onClick={handleShare} className="btn btn-primary"><Share2 className="w-4 h-4" /> Create Share</button>
+            <button onClick={() => setShowShareForm(!showShareForm)} className="btn btn-primary"><Share2 className="w-4 h-4" /> Create Share</button>
+            {createdShareToken && (
+              <div className="card border-[var(--success)]">
+                <p className="text-sm text-[var(--success)] font-semibold mb-2">Share created! Copy this token:</p>
+                <code className="block text-sm font-mono break-all bg-[var(--bg-secondary)] p-2 rounded">{createdShareToken}</code>
+                <button onClick={() => { navigator.clipboard.writeText(createdShareToken); }} className="btn btn-ghost mt-2 text-sm">Copy</button>
+              </div>
+            )}
+            {showShareForm && (
+              <div className="card space-y-3">
+                <h3 className="font-semibold">New Share</h3>
+                <div>
+                  <p className="text-sm text-[var(--text-secondary)] mb-2">Permissions</p>
+                  <div className="flex gap-2">
+                    {["read", "write", "admin"].map((p) => (
+                      <button key={p} type="button" onClick={() => toggleSharePerm(p)} className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${sharePerms.includes(p) ? "border-[var(--accent)] bg-[var(--accent)] bg-opacity-15 text-[var(--accent)]" : "border-[var(--border)] text-[var(--text-secondary)]"}`}>{p}</button>
+                    ))}
+                  </div>
+                </div>
+                <input type="text" placeholder="Label (optional)" value={shareLabel} onChange={(e) => setShareLabel(e.target.value)} className="w-full" />
+                <div className="grid grid-cols-2 gap-3">
+                  <input type="number" placeholder="Expires in hours (optional)" value={shareExpiry} onChange={(e) => setShareExpiry(e.target.value)} />
+                  <input type="number" placeholder="Max uses (optional)" value={shareMaxUses} onChange={(e) => setShareMaxUses(e.target.value)} />
+                </div>
+                <button onClick={handleShare} className="btn btn-primary">Create Share Token</button>
+              </div>
+            )}
             {shares.length === 0 ? (
               <div className="card text-[var(--text-secondary)] text-center py-8">No shares yet</div>
             ) : (
