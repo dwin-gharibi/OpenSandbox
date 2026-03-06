@@ -13,8 +13,10 @@ import {
   getEndpoint, getSandboxHealth, getSandboxCost, getAutoExtend,
   createSnapshot, listSnapshots, getSnapshot, deleteSnapshot, cloneSandbox,
   createShare, listShares, revokeShare, applyExtensions, listExtensions,
+  listProvisioningScripts, runProvisioningOnSandbox,
   type Sandbox, type SandboxHealth, type SandboxCost, type AutoExtendStats,
   type SnapshotInfo, type ShareInfo, type Endpoint, type ExtensionInfo,
+  type ProvisioningScriptInfo,
 } from "@/lib/api";
 import { SandboxTerminal } from "@/components/sandbox-terminal";
 import { CodeRunner } from "@/components/code-runner";
@@ -35,7 +37,7 @@ export default function SandboxDetailPage() {
   const [endpoint, setEndpoint] = useState<Endpoint | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [tab, setTab] = useState<"overview" | "terminal" | "code" | "files" | "snapshots" | "shares" | "extensions" | "vnc" | "endpoints">("overview");
+  const [tab, setTab] = useState<"overview" | "terminal" | "code" | "files" | "snapshots" | "shares" | "extensions" | "provision" | "vnc" | "endpoints">("overview");
 
   const fetchAll = async () => {
     try {
@@ -144,6 +146,10 @@ export default function SandboxDetailPage() {
   const [installing, setInstalling] = useState(false);
   const [installLog, setInstallLog] = useState("");
 
+  const [provScripts, setProvScripts] = useState<ProvisioningScriptInfo[]>([]);
+  const [provRunning, setProvRunning] = useState(false);
+  const [provLog, setProvLog] = useState("");
+
   const handleViewSnapshot = async (snapId: string) => {
     try {
       const snap = await getSnapshot(snapId);
@@ -155,7 +161,7 @@ export default function SandboxDetailPage() {
     try { setAvailableExtensions(await listExtensions()); } catch { /* ignore */ }
   };
 
-  const apiBase = process.env.NEXT_PUBLIC_API_URL || "/api/proxy";
+  const proxyBase = `${process.env.NEXT_PUBLIC_API_URL || "/api/proxy"}/sandboxes/${id}/proxy/44772`;
 
   const handleApplyExtensions = async () => {
     if (selectedExtensions.length === 0) { alert("Select at least one extension"); return; }
@@ -164,25 +170,46 @@ export default function SandboxDetailPage() {
     try {
       const result = await applyExtensions(id, selectedExtensions);
       setExtensionScript(result.setup_script);
-      setInstallLog((p) => p + "Executing setup script inside sandbox...\n");
 
-      const url = `${apiBase}/sandboxes/${id}/proxy/${44772}/command`;
-      const res = await fetch(url, {
+      setInstallLog((p) => p + "Uploading setup script to sandbox...\n");
+      const blob = new Blob([result.setup_script], { type: "text/plain" });
+      const formData = new FormData();
+      formData.append("metadata", JSON.stringify({ path: "/tmp/ext-setup.sh", mode: 755 }));
+      formData.append("file", blob, "ext-setup.sh");
+      await fetch(`${proxyBase}/files/upload`, { method: "POST", body: formData });
+
+      setInstallLog((p) => p + "Executing setup script...\n");
+      const res = await fetch(`${proxyBase}/command`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          command: `bash -c '${result.setup_script.replace(/'/g, "'\\''")}'`,
-          timeout: 120,
-          background: false,
-        }),
+        body: JSON.stringify({ command: "bash /tmp/ext-setup.sh", timeout: 120000 }),
       });
 
       if (!res.ok) {
-        const text = await res.text().catch(() => "");
-        setInstallLog((p) => p + `Installation failed: ${text}\n`);
+        setInstallLog((p) => p + `Installation returned HTTP ${res.status}\n`);
       } else {
-        const text = await res.text();
-        setInstallLog((p) => p + text + "\nInstallation complete!\n");
+        const reader = res.body?.getReader();
+        if (reader) {
+          const decoder = new TextDecoder();
+          let buf = "";
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buf += decoder.decode(value, { stream: true });
+            const lines = buf.split("\n");
+            buf = lines.pop() || "";
+            for (const line of lines) {
+              if (!line.startsWith("data: ")) continue;
+              try {
+                const ev = JSON.parse(line.slice(6));
+                if (ev.type === "stdout" && ev.text) setInstallLog((p) => p + ev.text);
+                else if (ev.type === "stderr" && ev.text) setInstallLog((p) => p + ev.text);
+                else if (ev.type === "error" && ev.error) setInstallLog((p) => p + `Error: ${ev.error.evalue || ev.error.ename}\n`);
+              } catch { /* skip */ }
+            }
+          }
+        }
+        setInstallLog((p) => p + "\nInstallation complete!\n");
         setInstalledExtensions((prev) => [...new Set([...prev, ...selectedExtensions])]);
         setSelectedExtensions([]);
       }
@@ -195,6 +222,60 @@ export default function SandboxDetailPage() {
 
   const handleRemoveExtension = (extId: string) => {
     setInstalledExtensions((prev) => prev.filter((e) => e !== extId));
+  };
+
+  const loadProvScripts = async () => {
+    try { setProvScripts(await listProvisioningScripts()); } catch { /* ignore */ }
+  };
+
+  const handleRunProvScript = async (scriptId: string) => {
+    setProvRunning(true);
+    setProvLog("Fetching script...\n");
+    try {
+      const result = await runProvisioningOnSandbox(id, scriptId);
+      setProvLog((p) => p + `Uploading "${result.script_name}" to sandbox...\n`);
+
+      const blob = new Blob([result.script], { type: "text/plain" });
+      const formData = new FormData();
+      formData.append("metadata", JSON.stringify({ path: "/tmp/provision.sh", mode: 755 }));
+      formData.append("file", blob, "provision.sh");
+      await fetch(`${proxyBase}/files/upload`, { method: "POST", body: formData });
+
+      setProvLog((p) => p + "Executing provisioning script...\n");
+      const res = await fetch(`${proxyBase}/command`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ command: "bash /tmp/provision.sh", timeout: result.timeout_seconds * 1000 }),
+      });
+
+      if (res.ok && res.body) {
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = "";
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          const lines = buf.split("\n");
+          buf = lines.pop() || "";
+          for (const line of lines) {
+            if (!line.startsWith("data: ")) continue;
+            try {
+              const ev = JSON.parse(line.slice(6));
+              if ((ev.type === "stdout" || ev.type === "stderr") && ev.text)
+                setProvLog((p) => p + ev.text);
+              else if (ev.type === "error" && ev.error)
+                setProvLog((p) => p + `Error: ${ev.error.evalue || ev.error.ename}\n`);
+            } catch { /* skip */ }
+          }
+        }
+      }
+      setProvLog((p) => p + "\nProvisioning complete!\n");
+    } catch (e: any) {
+      setProvLog((p) => p + `Error: ${e.message}\n`);
+    } finally {
+      setProvRunning(false);
+    }
   };
 
   const toggleExtension = (extId: string) => {
@@ -225,6 +306,7 @@ export default function SandboxDetailPage() {
     { key: "snapshots", label: `Snapshots (${snapshots.length})` },
     { key: "shares", label: `Shares (${shares.length})` },
     { key: "extensions", label: "Extensions" },
+    { key: "provision", label: "Provision" },
     { key: "vnc", label: "VNC" },
     { key: "endpoints", label: "Endpoints" },
   ] as const;
@@ -486,6 +568,48 @@ export default function SandboxDetailPage() {
                   </div>
                 )}
               </>
+            )}
+          </div>
+        )}
+
+        {tab === "provision" && (
+          <div className="space-y-4">
+            <p className="text-sm text-[var(--text-secondary)]">
+              Run provisioning scripts to set up this sandbox with tools, configurations, and dependencies.
+            </p>
+            {provScripts.length === 0 ? (
+              <button onClick={loadProvScripts} className="btn btn-primary">Load Provisioning Scripts</button>
+            ) : (
+              <div className="space-y-3">
+                {provScripts.map((s) => (
+                  <div key={s.id} className="card flex items-start justify-between">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <h4 className="font-medium text-sm">{s.name}</h4>
+                        <span className="text-xs text-[var(--text-secondary)]">{s.category}</span>
+                        {s.runOnCreate && <span className="badge badge-healthy text-[10px]">auto</span>}
+                      </div>
+                      <p className="text-xs text-[var(--text-secondary)] mt-0.5">{s.description}</p>
+                      {s.tags.length > 0 && (
+                        <div className="flex gap-1 mt-1">
+                          {s.tags.map((t) => <span key={t} className="px-1.5 py-0.5 rounded text-[10px] bg-[var(--bg-secondary)] text-[var(--text-secondary)]">{t}</span>)}
+                        </div>
+                      )}
+                    </div>
+                    <button onClick={() => handleRunProvScript(s.id)} disabled={provRunning}
+                      className="btn btn-primary text-sm shrink-0 ml-4">
+                      {provRunning ? <Loader2 className="w-3 h-3 animate-spin" /> : <Play className="w-3 h-3" />}
+                      Run
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            {provLog && (
+              <div className="card">
+                <h3 className="font-semibold mb-2 text-sm">Provisioning Log</h3>
+                <pre className="text-xs bg-[#0d1117] text-[#c9d1d9] p-4 rounded-lg overflow-auto max-h-60 font-mono">{provLog}</pre>
+              </div>
             )}
           </div>
         )}

@@ -15,6 +15,7 @@ import {
   LogOut,
   Plus,
   Package,
+  FileCode,
 } from "lucide-react";
 import { clearApiKey, hasApiKey } from "@/lib/api";
 
@@ -25,6 +26,7 @@ const navSections = [
       { href: "/", label: "Dashboard", icon: LayoutDashboard },
       { href: "/sandboxes", label: "Sandboxes", icon: Box },
       { href: "/extensions", label: "Extensions", icon: Package },
+      { href: "/provisioning", label: "Provisioning", icon: FileCode },
     ],
   },
   {

@@ -6,7 +6,6 @@ import { Play, Loader2, Trash2, AlertCircle } from "lucide-react";
 interface Props {
   sandboxId: string;
   port?: number;
-  apiBase?: string;
 }
 
 const LANGUAGES = [
@@ -20,15 +19,15 @@ const LANGUAGES = [
 
 const EXAMPLES: Record<string, string> = {
   python: 'import sys\nprint(f"Python {sys.version}")\nfor i in range(5):\n    print(f"  {i}: {i**2}")',
-  javascript: 'console.log("Node.js " + process.version);\nfor (let i = 0; i < 5; i++) {\n  console.log("  " + i + ": " + i*i);\n}',
+  javascript: 'console.log("Node.js " + process.version);\nfor (let i = 0; i < 5; i++) console.log("  " + i + ": " + i*i);',
   typescript: 'const greet = (name: string): string => `Hello, ${name}!`;\nconsole.log(greet("Sandbox"));',
   java: 'public class Main {\n    public static void main(String[] args) {\n        System.out.println("Hello from Java!");\n    }\n}',
   go: 'package main\nimport "fmt"\nfunc main() {\n    fmt.Println("Hello from Go!")\n}',
-  bash: 'echo "Hello from Bash!"\necho "Hostname: $(hostname)"\necho "PWD: $(pwd)"\nls -la /',
+  bash: 'echo "Hello from Bash!"\necho "Hostname: $(hostname)"\necho "PWD: $(pwd)"',
 };
 
-export function CodeRunner({ sandboxId, port = 44772, apiBase }: Props) {
-  const base = apiBase || process.env.NEXT_PUBLIC_API_URL || "/api/proxy";
+export function CodeRunner({ sandboxId, port = 44772 }: Props) {
+  const base = process.env.NEXT_PUBLIC_API_URL || "/api/proxy";
   const [lang, setLang] = useState("python");
   const [code, setCode] = useState(EXAMPLES.python);
   const [output, setOutput] = useState("");
@@ -51,62 +50,67 @@ export function CodeRunner({ sandboxId, port = 44772, apiBase }: Props) {
     setConnError("");
 
     try {
-      const url = `${base}/sandboxes/${sandboxId}/proxy/${port}/code`;
-      const res = await fetch(url, {
+      const res = await fetch(`${base}/sandboxes/${sandboxId}/proxy/${port}/code`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ code, language: lang }),
       });
 
       if (!res.ok) {
-        const text = await res.text().catch(() => `HTTP ${res.status}`);
-        setError(text);
-        if (res.status === 502 || res.status === 404) {
-          setConnError("Cannot reach sandbox code interpreter");
-        }
+        setError(await res.text().catch(() => `HTTP ${res.status}`));
+        if (res.status >= 500) setConnError("Cannot reach sandbox code interpreter");
         setRunning(false);
         return;
       }
 
-      const contentType = res.headers.get("content-type") || "";
-      if (contentType.includes("text/event-stream")) {
-        const reader = res.body?.getReader();
-        if (!reader) { setRunning(false); return; }
-        const decoder = new TextDecoder();
-        let out = "", err = "";
-        let buffer = "";
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split("\n");
-          buffer = lines.pop() || "";
-          for (const line of lines) {
-            if (!line.startsWith("data: ")) continue;
-            try {
-              const d = JSON.parse(line.slice(6));
-              const txt = d.data || d.output || d.text || "";
-              if (d.output_type === "stderr" || d.type === "stderr") err += txt;
-              else out += txt;
-            } catch {
-              out += line.slice(6) + "\n";
+      const reader = res.body?.getReader();
+      if (!reader) { setRunning(false); return; }
+
+      const decoder = new TextDecoder();
+      let out = "", err = "", buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          try {
+            const ev = JSON.parse(line.slice(6));
+            switch (ev.type) {
+              case "stdout":
+                if (ev.text) out += ev.text;
+                break;
+              case "stderr":
+                if (ev.text) err += ev.text;
+                break;
+              case "result":
+                if (ev.results) {
+                  const plain = ev.results["text/plain"];
+                  if (plain) out += plain + "\n";
+                }
+                if (ev.text) out += ev.text;
+                break;
+              case "error":
+                if (ev.error) {
+                  err += `${ev.error.ename || "Error"}: ${ev.error.evalue || ""}\n`;
+                  if (ev.error.traceback) err += ev.error.traceback.join("\n") + "\n";
+                }
+                break;
+              case "execution_complete":
+                if (ev.execution_time) out += `\n[Completed in ${ev.execution_time}ms]\n`;
+                break;
             }
-          }
-          setOutput(out);
-          setError(err);
+          } catch { /* skip */ }
         }
         setOutput(out);
         setError(err);
-      } else {
-        const text = await res.text();
-        try {
-          const j = JSON.parse(text);
-          setOutput(j.stdout || j.output || j.result || text);
-          if (j.stderr) setError(j.stderr);
-        } catch {
-          setOutput(text);
-        }
       }
+      setOutput(out);
+      setError(err);
     } catch (e: any) {
       setError(e.message);
       setConnError("Network error");
@@ -130,7 +134,7 @@ export function CodeRunner({ sandboxId, port = 44772, apiBase }: Props) {
           {running ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
           {running ? "Running..." : "Run"}
         </button>
-        <button onClick={() => { setCode(""); setOutput(""); setError(""); }} className="btn btn-ghost">
+        <button onClick={() => { setCode(""); setOutput(""); setError(""); setConnError(""); }} className="btn btn-ghost">
           <Trash2 className="w-4 h-4" /> Clear
         </button>
       </div>

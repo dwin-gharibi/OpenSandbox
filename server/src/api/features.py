@@ -36,6 +36,7 @@ from src.services.rbac import get_rbac_manager
 from src.services.sharing import get_sharing_manager
 from src.services.snapshots import get_snapshot_manager
 from src.services.extensions import get_extension_registry
+from src.services.provisioning import ProvisioningScript, get_provisioning_manager
 
 logger = logging.getLogger(__name__)
 
@@ -649,6 +650,140 @@ async def apply_extensions(sandbox_id: str, request: ApplyExtensionsRequest) -> 
         "setup_script": script,
         "env": env,
         "ports": ports,
+        "status": "ready",
+    }
+
+
+# ============================================================================
+# Provisioning Scripts
+# ============================================================================
+
+
+class CreateProvisioningScriptRequest(BaseModel):
+    name: str = Field(..., min_length=1)
+    description: str = Field("")
+    script: str = Field(..., min_length=1)
+    language: str = Field("bash")
+    category: str = Field("general")
+    tags: List[str] = Field(default_factory=list)
+    env: Dict[str, str] = Field(default_factory=dict)
+    timeout_seconds: int = Field(120, alias="timeoutSeconds", ge=1, le=600)
+    run_on_create: bool = Field(False, alias="runOnCreate")
+
+    class Config:
+        populate_by_name = True
+
+
+class UpdateProvisioningScriptRequest(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    script: Optional[str] = None
+    category: Optional[str] = None
+    tags: Optional[List[str]] = None
+    env: Optional[Dict[str, str]] = None
+    timeout_seconds: Optional[int] = Field(None, alias="timeoutSeconds", ge=1, le=600)
+    run_on_create: Optional[bool] = Field(None, alias="runOnCreate")
+
+    class Config:
+        populate_by_name = True
+
+
+def _script_to_dict(s: ProvisioningScript) -> Dict[str, Any]:
+    return {
+        "id": s.id,
+        "name": s.name,
+        "description": s.description,
+        "script": s.script,
+        "language": s.language,
+        "category": s.category,
+        "tags": s.tags,
+        "env": s.env,
+        "timeoutSeconds": s.timeout_seconds,
+        "runOnCreate": s.run_on_create,
+        "createdBy": s.created_by,
+        "createdAt": s.created_at,
+        "updatedAt": s.updated_at,
+    }
+
+
+@features_router.get("/provisioning-scripts")
+async def list_provisioning_scripts(
+    category: Optional[str] = Query(None),
+    tag: Optional[str] = Query(None),
+    q: Optional[str] = Query(None),
+) -> List[Dict[str, Any]]:
+    mgr = get_provisioning_manager()
+    if q:
+        scripts = mgr.search(q)
+    else:
+        scripts = mgr.list_all(category=category, tag=tag)
+    return [_script_to_dict(s) for s in scripts]
+
+
+@features_router.get("/provisioning-scripts/categories")
+async def list_provisioning_categories() -> List[str]:
+    return get_provisioning_manager().get_categories()
+
+
+@features_router.post("/provisioning-scripts", status_code=status.HTTP_201_CREATED)
+async def create_provisioning_script(request: CreateProvisioningScriptRequest) -> Dict[str, Any]:
+    mgr = get_provisioning_manager()
+    s = ProvisioningScript(
+        name=request.name,
+        description=request.description,
+        script=request.script,
+        language=request.language,
+        category=request.category,
+        tags=request.tags,
+        env=request.env,
+        timeout_seconds=request.timeout_seconds,
+        run_on_create=request.run_on_create,
+    )
+    return _script_to_dict(mgr.create(s))
+
+
+@features_router.get("/provisioning-scripts/{script_id}")
+async def get_provisioning_script(script_id: str) -> Dict[str, Any]:
+    s = get_provisioning_manager().get(script_id)
+    if s is None:
+        raise HTTPException(status_code=404, detail={"code": "SCRIPT_NOT_FOUND", "message": "Provisioning script not found"})
+    return _script_to_dict(s)
+
+
+@features_router.put("/provisioning-scripts/{script_id}")
+async def update_provisioning_script(script_id: str, request: UpdateProvisioningScriptRequest) -> Dict[str, Any]:
+    mgr = get_provisioning_manager()
+    s = mgr.update(
+        script_id,
+        name=request.name, description=request.description, script=request.script,
+        category=request.category, tags=request.tags, env=request.env,
+        timeout_seconds=request.timeout_seconds, run_on_create=request.run_on_create,
+    )
+    if s is None:
+        raise HTTPException(status_code=404, detail={"code": "SCRIPT_NOT_FOUND", "message": "Provisioning script not found"})
+    return _script_to_dict(s)
+
+
+@features_router.delete("/provisioning-scripts/{script_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_provisioning_script(script_id: str) -> Response:
+    if not get_provisioning_manager().delete(script_id):
+        raise HTTPException(status_code=404, detail={"code": "SCRIPT_NOT_FOUND", "message": "Provisioning script not found"})
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@features_router.post("/sandboxes/{sandbox_id}/provision")
+async def run_provisioning_script(sandbox_id: str, script_id: str = Query(..., alias="scriptId")) -> Dict[str, Any]:
+    """Upload and execute a provisioning script inside the sandbox."""
+    s = get_provisioning_manager().get(script_id)
+    if s is None:
+        raise HTTPException(status_code=404, detail={"code": "SCRIPT_NOT_FOUND", "message": "Provisioning script not found"})
+    return {
+        "sandbox_id": sandbox_id,
+        "script_id": s.id,
+        "script_name": s.name,
+        "script": s.script,
+        "env": s.env,
+        "timeout_seconds": s.timeout_seconds,
         "status": "ready",
     }
 
