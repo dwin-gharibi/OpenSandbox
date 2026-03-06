@@ -53,7 +53,7 @@ export function CodeRunner({ sandboxId, port = 44772 }: Props) {
       const res = await fetch(`${base}/sandboxes/${sandboxId}/proxy/${port}/code`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code, language: lang }),
+        body: JSON.stringify({ code, context: { language: lang } }),
       });
 
       if (!res.ok) {

@@ -583,7 +583,7 @@ export const execCode = (sandboxId: string, port: number, code: string, language
   fetch(proxyUrl(sandboxId, port, "code"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ code, language }),
+    body: JSON.stringify({ code, context: { language } }),
   });
 
 export const listFiles = (sandboxId: string, port: number, path: string) =>
@@ -593,8 +593,13 @@ export const listFiles = (sandboxId: string, port: number, path: string) =>
 export const downloadFile = (sandboxId: string, port: number, path: string) =>
   fetch(proxyUrl(sandboxId, port, `files/download?path=${encodeURIComponent(path)}`));
 
-export const uploadFiles = (sandboxId: string, port: number, formData: FormData) =>
-  fetch(proxyUrl(sandboxId, port, "files/upload"), { method: "POST", body: formData });
+export const uploadFile = (sandboxId: string, port: number, targetPath: string, file: File | Blob, fileName?: string) => {
+  const metaBlob = new Blob([JSON.stringify({ path: targetPath, mode: 644 })], { type: "application/json" });
+  const formData = new FormData();
+  formData.append("metadata", metaBlob, "metadata.json");
+  formData.append("file", file, fileName || "file");
+  return fetch(proxyUrl(sandboxId, port, "files/upload"), { method: "POST", body: formData });
+};
 
 export const getMetricsFromSandbox = (sandboxId: string, port: number) =>
   fetch(proxyUrl(sandboxId, port, "metrics")).then((r) => r.json());
