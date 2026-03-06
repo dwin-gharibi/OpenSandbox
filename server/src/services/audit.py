@@ -67,12 +67,15 @@ class AuditLog:
             self._conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_audit_resource ON audit_log(resource_type, resource_id)"
             )
-            self._conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_audit_actor ON audit_log(actor)"
-            )
+            self._conn.execute("CREATE INDEX IF NOT EXISTS idx_audit_actor ON audit_log(actor)")
             self._conn.commit()
 
     def record(self, entry: AuditEntry) -> None:
+        """Persist an audit entry to the database.
+
+        Args:
+            entry: The audit entry to store.
+        """
         with self._lock:
             self._conn.execute(
                 """INSERT INTO audit_log (id, timestamp, actor, action, resource_type,
@@ -103,6 +106,20 @@ class AuditLog:
         limit: int = 100,
         offset: int = 0,
     ) -> List[Dict[str, Any]]:
+        """Query audit entries with optional filters and pagination.
+
+        Args:
+            actor: Filter by actor identity.
+            action: Filter by action type.
+            resource_id: Filter by resource identifier.
+            since: ISO 8601 lower bound for timestamp.
+            until: ISO 8601 upper bound for timestamp.
+            limit: Maximum number of results.
+            offset: Number of results to skip.
+
+        Returns:
+            List of audit entry dictionaries ordered by timestamp descending.
+        """
         clauses: List[str] = []
         params: List[Any] = []
         if actor:

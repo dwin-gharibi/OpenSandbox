@@ -1,7 +1,13 @@
 """Tests for the audit logging module."""
 
 import pytest
-from src.services.audit import AuditEntry, AuditLog, get_audit_log, reset_audit_log, setup_audit_event_listener
+from src.services.audit import (
+    AuditEntry,
+    AuditLog,
+    get_audit_log,
+    reset_audit_log,
+    setup_audit_event_listener,
+)
 from src.services.event_bus import EventBus, EventType, SandboxEvent, reset_event_bus
 
 
@@ -63,10 +69,14 @@ class TestAuditLog:
 
     def test_details_stored_as_json(self):
         audit = AuditLog()
-        audit.record(AuditEntry(
-            actor="u1", action="test", resource_id="r-1",
-            details={"key": "value", "nested": {"a": 1}},
-        ))
+        audit.record(
+            AuditEntry(
+                actor="u1",
+                action="test",
+                resource_id="r-1",
+                details={"key": "value", "nested": {"a": 1}},
+            )
+        )
         results = audit.query()
         assert results[0]["details"] == {"key": "value", "nested": {"a": 1}}
         audit.close()
@@ -75,9 +85,13 @@ class TestAuditLog:
         bus = EventBus()
         setup_audit_event_listener(bus)
         audit = get_audit_log()
-        bus.publish(SandboxEvent(
-            event_type=EventType.SANDBOX_CREATED, sandbox_id="sb-1", actor="user1",
-        ))
+        bus.publish(
+            SandboxEvent(
+                event_type=EventType.SANDBOX_CREATED,
+                sandbox_id="sb-1",
+                actor="user1",
+            )
+        )
         results = audit.query()
         assert len(results) >= 1
         assert results[0]["action"] == "sandbox.created"

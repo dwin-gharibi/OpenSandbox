@@ -47,29 +47,59 @@ Subscriber = Callable[[SandboxEvent], Any]
 
 
 class EventBus:
-    """Simple in-process pub/sub for sandbox events."""
+    """Simple in-process pub/sub for sandbox events.
+
+    Subscribers can register for specific event types or use None for wildcard.
+    Webhooks are dispatched asynchronously when an event loop is available.
+    """
 
     def __init__(self) -> None:
         self._subscribers: Dict[Optional[EventType], List[Subscriber]] = {}
         self._webhooks: List[Dict[str, Any]] = []
 
     def subscribe(self, event_type: Optional[EventType], callback: Subscriber) -> None:
+        """Register a callback for a specific event type, or None for all events.
+
+        Args:
+            event_type: The event type to listen for, or None for all events.
+            callback: Function called with SandboxEvent when a matching event fires.
+        """
         self._subscribers.setdefault(event_type, []).append(callback)
 
     def unsubscribe(self, event_type: Optional[EventType], callback: Subscriber) -> None:
+        """Remove a previously registered callback.
+
+        Args:
+            event_type: The event type the callback was registered for.
+            callback: The callback to remove.
+        """
         subs = self._subscribers.get(event_type, [])
         if callback in subs:
             subs.remove(callback)
 
-    def register_webhook(self, url: str, events: Optional[List[EventType]] = None, secret: str = "") -> str:
+    def register_webhook(
+        self, url: str, events: Optional[List[EventType]] = None, secret: str = ""
+    ) -> str:
+        """Register a webhook endpoint for event delivery.
+
+        Args:
+            url: The HTTP(S) URL to deliver events to.
+            events: Optional filter list; None means all events.
+            secret: Shared secret for HMAC signature verification.
+
+        Returns:
+            The webhook ID for later management.
+        """
         webhook_id = uuid4().hex
-        self._webhooks.append({
-            "id": webhook_id,
-            "url": url,
-            "events": events,
-            "secret": secret,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        })
+        self._webhooks.append(
+            {
+                "id": webhook_id,
+                "url": url,
+                "events": events,
+                "secret": secret,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }
+        )
         return webhook_id
 
     def unregister_webhook(self, webhook_id: str) -> bool:
@@ -81,6 +111,11 @@ class EventBus:
         return list(self._webhooks)
 
     def publish(self, event: SandboxEvent) -> None:
+        """Publish an event to all matching subscribers and webhooks.
+
+        Args:
+            event: The sandbox event to broadcast.
+        """
         all_subs = self._subscribers.get(None, []) + self._subscribers.get(event.event_type, [])
         for sub in all_subs:
             try:
@@ -107,6 +142,7 @@ class EventBus:
 
     async def _send_webhook(self, webhook: Dict[str, Any], event: SandboxEvent) -> None:
         import httpx
+
         payload = {
             "id": event.id,
             "type": event.event_type.value,
@@ -121,6 +157,7 @@ class EventBus:
                 if webhook.get("secret"):
                     import hashlib
                     import json
+
                     sig = hashlib.sha256(
                         (webhook["secret"] + json.dumps(payload, sort_keys=True)).encode()
                     ).hexdigest()

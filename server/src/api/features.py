@@ -45,6 +45,7 @@ features_router = APIRouter(tags=["Features"])
 # Pydantic models for feature endpoints
 # ============================================================================
 
+
 class CreateSnapshotRequest(BaseModel):
     description: str = Field("", description="Human-readable description of the snapshot")
 
@@ -58,7 +59,9 @@ class CreateSnapshotResponse(BaseModel):
 
 
 class CloneSandboxRequest(BaseModel):
-    source_sandbox_id: str = Field(..., alias="sourceSandboxId", description="ID of the sandbox to clone")
+    source_sandbox_id: str = Field(
+        ..., alias="sourceSandboxId", description="ID of the sandbox to clone"
+    )
     timeout: int = Field(3600, ge=60, le=86400, description="Timeout for the cloned sandbox")
 
     class Config:
@@ -75,8 +78,12 @@ class CloneSandboxResponse(BaseModel):
 class CreateApiKeyRequest(BaseModel):
     name: str = Field(..., min_length=1, description="Human-readable name for the key")
     role: str = Field("user", description="Role: admin, user, or viewer")
-    rate_limit: Optional[int] = Field(None, alias="rateLimit", description="Custom rate limit per minute")
-    sandbox_quota: Optional[int] = Field(None, alias="sandboxQuota", description="Max sandboxes this key can create")
+    rate_limit: Optional[int] = Field(
+        None, alias="rateLimit", description="Custom rate limit per minute"
+    )
+    sandbox_quota: Optional[int] = Field(
+        None, alias="sandboxQuota", description="Max sandboxes this key can create"
+    )
 
     class Config:
         populate_by_name = True
@@ -92,7 +99,9 @@ class CreateApiKeyResponse(BaseModel):
 
 class RegisterWebhookRequest(BaseModel):
     url: str = Field(..., description="Webhook delivery URL")
-    events: Optional[List[str]] = Field(None, description="Event types to subscribe to (null = all)")
+    events: Optional[List[str]] = Field(
+        None, description="Event types to subscribe to (null = all)"
+    )
     secret: str = Field("", description="Shared secret for signature verification")
 
 
@@ -125,6 +134,7 @@ class CreateShareResponse(BaseModel):
 # ============================================================================
 # Snapshots
 # ============================================================================
+
 
 @features_router.post(
     "/sandboxes/{sandbox_id}/snapshots",
@@ -164,7 +174,9 @@ async def get_snapshot(snapshot_id: str) -> Dict[str, Any]:
     mgr = get_snapshot_manager()
     snapshot = mgr.get_snapshot(snapshot_id)
     if snapshot is None:
-        raise HTTPException(status_code=404, detail={"code": "SNAPSHOT_NOT_FOUND", "message": "Snapshot not found"})
+        raise HTTPException(
+            status_code=404, detail={"code": "SNAPSHOT_NOT_FOUND", "message": "Snapshot not found"}
+        )
     return asdict(snapshot)
 
 
@@ -172,7 +184,9 @@ async def get_snapshot(snapshot_id: str) -> Dict[str, Any]:
 async def delete_snapshot(snapshot_id: str) -> Response:
     mgr = get_snapshot_manager()
     if not mgr.delete_snapshot(snapshot_id):
-        raise HTTPException(status_code=404, detail={"code": "SNAPSHOT_NOT_FOUND", "message": "Snapshot not found"})
+        raise HTTPException(
+            status_code=404, detail={"code": "SNAPSHOT_NOT_FOUND", "message": "Snapshot not found"}
+        )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -180,18 +194,22 @@ async def delete_snapshot(snapshot_id: str) -> Response:
 # Cloning
 # ============================================================================
 
+
 @features_router.post("/sandboxes/clone", status_code=status.HTTP_201_CREATED)
 async def clone_sandbox(request: CloneSandboxRequest) -> CloneSandboxResponse:
     from uuid import uuid4
+
     clone_id = str(uuid4())
     CLONE_COUNT.inc()
 
     bus = get_event_bus()
-    bus.publish(SandboxEvent(
-        event_type=EventType.SANDBOX_CLONED,
-        sandbox_id=clone_id,
-        data={"source_sandbox_id": request.source_sandbox_id, "timeout": request.timeout},
-    ))
+    bus.publish(
+        SandboxEvent(
+            event_type=EventType.SANDBOX_CLONED,
+            sandbox_id=clone_id,
+            data={"source_sandbox_id": request.source_sandbox_id, "timeout": request.timeout},
+        )
+    )
 
     return CloneSandboxResponse(
         id=clone_id,
@@ -205,6 +223,7 @@ async def clone_sandbox(request: CloneSandboxRequest) -> CloneSandboxResponse:
 # Prometheus Metrics
 # ============================================================================
 
+
 @features_router.get("/metrics/prometheus")
 async def prometheus_metrics() -> Response:
     return Response(content=get_metrics(), media_type=get_content_type())
@@ -213,6 +232,7 @@ async def prometheus_metrics() -> Response:
 # ============================================================================
 # Rate Limiting Info
 # ============================================================================
+
 
 @features_router.get("/rate-limit")
 async def get_rate_limit_info(
@@ -229,6 +249,7 @@ async def get_rate_limit_info(
 # RBAC / API Key Management
 # ============================================================================
 
+
 @features_router.post("/admin/api-keys", status_code=status.HTTP_201_CREATED)
 async def create_api_key(request: CreateApiKeyRequest) -> CreateApiKeyResponse:
     mgr = get_rbac_manager()
@@ -239,7 +260,11 @@ async def create_api_key(request: CreateApiKeyRequest) -> CreateApiKeyResponse:
         sandbox_quota=request.sandbox_quota,
     )
     return CreateApiKeyResponse(
-        id=key.id, key=key.key, name=key.name, role=key.role, created_at=key.created_at,
+        id=key.id,
+        key=key.key,
+        name=key.name,
+        role=key.role,
+        created_at=key.created_at,
     )
 
 
@@ -265,7 +290,9 @@ async def list_api_keys() -> List[Dict[str, Any]]:
 async def delete_api_key(key_id: str) -> Response:
     mgr = get_rbac_manager()
     if not mgr.delete_key(key_id):
-        raise HTTPException(status_code=404, detail={"code": "KEY_NOT_FOUND", "message": "API key not found"})
+        raise HTTPException(
+            status_code=404, detail={"code": "KEY_NOT_FOUND", "message": "API key not found"}
+        )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -273,13 +300,16 @@ async def delete_api_key(key_id: str) -> Response:
 async def revoke_api_key(key_id: str) -> Dict[str, str]:
     mgr = get_rbac_manager()
     if not mgr.revoke_key(key_id):
-        raise HTTPException(status_code=404, detail={"code": "KEY_NOT_FOUND", "message": "API key not found"})
+        raise HTTPException(
+            status_code=404, detail={"code": "KEY_NOT_FOUND", "message": "API key not found"}
+        )
     return {"status": "revoked", "key_id": key_id}
 
 
 # ============================================================================
 # Webhooks
 # ============================================================================
+
 
 @features_router.post("/admin/webhooks", status_code=status.HTTP_201_CREATED)
 async def register_webhook(request: RegisterWebhookRequest) -> RegisterWebhookResponse:
@@ -289,7 +319,9 @@ async def register_webhook(request: RegisterWebhookRequest) -> RegisterWebhookRe
         events = [EventType(e) for e in request.events]
     wh_id = bus.register_webhook(url=request.url, events=events, secret=request.secret)
     return RegisterWebhookResponse(
-        id=wh_id, url=request.url, events=request.events,
+        id=wh_id,
+        url=request.url,
+        events=request.events,
         created_at=datetime.now(timezone.utc).isoformat(),
     )
 
@@ -304,13 +336,16 @@ async def list_webhooks() -> List[Dict[str, Any]]:
 async def delete_webhook(webhook_id: str) -> Response:
     bus = get_event_bus()
     if not bus.unregister_webhook(webhook_id):
-        raise HTTPException(status_code=404, detail={"code": "WEBHOOK_NOT_FOUND", "message": "Webhook not found"})
+        raise HTTPException(
+            status_code=404, detail={"code": "WEBHOOK_NOT_FOUND", "message": "Webhook not found"}
+        )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 # ============================================================================
 # Audit Log
 # ============================================================================
+
 
 @features_router.get("/admin/audit")
 async def query_audit_log(
@@ -324,8 +359,13 @@ async def query_audit_log(
 ) -> Dict[str, Any]:
     audit = get_audit_log()
     entries = audit.query(
-        actor=actor, action=action, resource_id=resource_id,
-        since=since, until=until, limit=limit, offset=offset,
+        actor=actor,
+        action=action,
+        resource_id=resource_id,
+        since=since,
+        until=until,
+        limit=limit,
+        offset=offset,
     )
     total = audit.count(actor=actor, action=action, resource_id=resource_id)
     return {"items": entries, "total": total, "limit": limit, "offset": offset}
@@ -334,6 +374,7 @@ async def query_audit_log(
 # ============================================================================
 # Cost Tracking
 # ============================================================================
+
 
 @features_router.get("/admin/cost/summary")
 async def cost_summary(
@@ -363,6 +404,7 @@ async def cost_by_api_key(
 # Sharing
 # ============================================================================
 
+
 @features_router.post("/sandboxes/{sandbox_id}/shares", status_code=status.HTTP_201_CREATED)
 async def create_share(sandbox_id: str, request: CreateShareRequest) -> CreateShareResponse:
     mgr = get_sharing_manager()
@@ -374,8 +416,11 @@ async def create_share(sandbox_id: str, request: CreateShareRequest) -> CreateSh
         max_uses=request.max_uses,
     )
     return CreateShareResponse(
-        id=share.id, token=share.token, sandbox_id=share.sandbox_id,
-        permissions=share.permissions, created_at=share.created_at,
+        id=share.id,
+        token=share.token,
+        sandbox_id=share.sandbox_id,
+        permissions=share.permissions,
+        created_at=share.created_at,
         expires_at=share.expires_at,
     )
 
@@ -386,9 +431,14 @@ async def list_shares(sandbox_id: str) -> List[Dict[str, Any]]:
     shares = mgr.list_shares(sandbox_id)
     return [
         {
-            "id": s.id, "sandbox_id": s.sandbox_id, "permissions": s.permissions,
-            "label": s.label, "created_at": s.created_at, "expires_at": s.expires_at,
-            "use_count": s.use_count, "max_uses": s.max_uses,
+            "id": s.id,
+            "sandbox_id": s.sandbox_id,
+            "permissions": s.permissions,
+            "label": s.label,
+            "created_at": s.created_at,
+            "expires_at": s.expires_at,
+            "use_count": s.use_count,
+            "max_uses": s.max_uses,
             "token_prefix": s.token[:8] + "***",
         }
         for s in shares
@@ -399,7 +449,9 @@ async def list_shares(sandbox_id: str) -> List[Dict[str, Any]]:
 async def revoke_share(share_id: str) -> Response:
     mgr = get_sharing_manager()
     if not mgr.revoke_share(share_id):
-        raise HTTPException(status_code=404, detail={"code": "SHARE_NOT_FOUND", "message": "Share not found"})
+        raise HTTPException(
+            status_code=404, detail={"code": "SHARE_NOT_FOUND", "message": "Share not found"}
+        )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -424,6 +476,7 @@ async def validate_share_token(
 # ============================================================================
 # Health Monitoring Dashboard
 # ============================================================================
+
 
 @features_router.get("/admin/dashboard")
 async def health_dashboard() -> Dict[str, Any]:
@@ -466,6 +519,7 @@ async def sandbox_health(sandbox_id: str) -> Dict[str, Any]:
 # TTL Auto-Extension Info
 # ============================================================================
 
+
 @features_router.get("/sandboxes/{sandbox_id}/auto-extend")
 async def auto_extend_status(sandbox_id: str) -> Dict[str, Any]:
     mgr = get_auto_extend_manager()
@@ -476,11 +530,13 @@ async def auto_extend_status(sandbox_id: str) -> Dict[str, Any]:
 # WebSocket Proxy
 # ============================================================================
 
+
 @features_router.websocket("/sandboxes/{sandbox_id}/ws/{port}/{path:path}")
 async def websocket_proxy(websocket: WebSocket, sandbox_id: str, port: int, path: str = "") -> None:
     import websockets
 
     from src.services.factory import create_sandbox_service
+
     service = create_sandbox_service()
 
     try:
@@ -495,6 +551,7 @@ async def websocket_proxy(websocket: WebSocket, sandbox_id: str, port: int, path
 
     try:
         async with websockets.connect(target_url) as ws_backend:
+
             async def forward_client_to_backend() -> None:
                 try:
                     while True:

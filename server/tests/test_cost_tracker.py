@@ -23,10 +23,17 @@ def _reset():
 class TestCostTracker:
     def test_record_and_get_sandbox_cost(self):
         tracker = CostTracker()
-        tracker.record(CostRecord(
-            sandbox_id="sb-1", api_key="key1", resource_type="sandbox_hours",
-            quantity=2.0, unit="hours", unit_cost=0.01, total_cost=0.02,
-        ))
+        tracker.record(
+            CostRecord(
+                sandbox_id="sb-1",
+                api_key="key1",
+                resource_type="sandbox_hours",
+                quantity=2.0,
+                unit="hours",
+                unit_cost=0.01,
+                total_cost=0.02,
+            )
+        )
         result = tracker.get_sandbox_cost("sb-1")
         assert result["sandbox_id"] == "sb-1"
         assert result["total_cost"] == 0.02
@@ -44,28 +51,56 @@ class TestCostTracker:
 
     def test_get_api_key_cost(self):
         tracker = CostTracker()
-        tracker.record(CostRecord(
-            sandbox_id="sb-1", api_key="key1", resource_type="sandbox_hours",
-            quantity=1.0, unit="hours", unit_cost=0.01, total_cost=0.01,
-        ))
-        tracker.record(CostRecord(
-            sandbox_id="sb-2", api_key="key1", resource_type="sandbox_hours",
-            quantity=2.0, unit="hours", unit_cost=0.01, total_cost=0.02,
-        ))
+        tracker.record(
+            CostRecord(
+                sandbox_id="sb-1",
+                api_key="key1",
+                resource_type="sandbox_hours",
+                quantity=1.0,
+                unit="hours",
+                unit_cost=0.01,
+                total_cost=0.01,
+            )
+        )
+        tracker.record(
+            CostRecord(
+                sandbox_id="sb-2",
+                api_key="key1",
+                resource_type="sandbox_hours",
+                quantity=2.0,
+                unit="hours",
+                unit_cost=0.01,
+                total_cost=0.02,
+            )
+        )
         result = tracker.get_api_key_cost("key1")
         assert result["total_cost"] == 0.03
         tracker.close()
 
     def test_get_summary(self):
         tracker = CostTracker()
-        tracker.record(CostRecord(
-            sandbox_id="sb-1", api_key="k1", resource_type="sandbox_hours",
-            quantity=1.0, unit="hours", unit_cost=0.01, total_cost=0.01,
-        ))
-        tracker.record(CostRecord(
-            sandbox_id="sb-2", api_key="k2", resource_type="sandbox_hours",
-            quantity=1.0, unit="hours", unit_cost=0.01, total_cost=0.01,
-        ))
+        tracker.record(
+            CostRecord(
+                sandbox_id="sb-1",
+                api_key="k1",
+                resource_type="sandbox_hours",
+                quantity=1.0,
+                unit="hours",
+                unit_cost=0.01,
+                total_cost=0.01,
+            )
+        )
+        tracker.record(
+            CostRecord(
+                sandbox_id="sb-2",
+                api_key="k2",
+                resource_type="sandbox_hours",
+                quantity=1.0,
+                unit="hours",
+                unit_cost=0.01,
+                total_cost=0.01,
+            )
+        )
         result = tracker.get_summary()
         assert result["total_cost"] == 0.02
         assert result["sandbox_count"] == 2
@@ -83,10 +118,13 @@ class TestCostTracker:
         bus = EventBus()
         setup_cost_event_listener(bus)
         tracker = get_cost_tracker()
-        bus.publish(SandboxEvent(
-            event_type=EventType.SANDBOX_SNAPSHOT_CREATED,
-            sandbox_id="sb-1", actor="key1",
-        ))
+        bus.publish(
+            SandboxEvent(
+                event_type=EventType.SANDBOX_SNAPSHOT_CREATED,
+                sandbox_id="sb-1",
+                actor="key1",
+            )
+        )
         result = tracker.get_sandbox_cost("sb-1")
         assert result["total_cost"] > 0
 

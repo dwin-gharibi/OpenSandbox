@@ -65,9 +65,7 @@ _log_config["loggers"]["src"] = {
 }
 
 logging.config.dictConfig(_log_config)
-logging.getLogger().setLevel(
-    getattr(logging, app_config.server.log_level.upper(), logging.INFO)
-)
+logging.getLogger().setLevel(getattr(logging, app_config.server.log_level.upper(), logging.INFO))
 
 from src.api.lifecycle import router  # noqa: E402
 from src.api.features import features_router  # noqa: E402
@@ -84,6 +82,7 @@ from src.services.auto_extend import setup_auto_extend_listener  # noqa: E402
 from src.services.rbac import get_rbac_manager  # noqa: E402
 
 logger = logging.getLogger(__name__)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -144,7 +143,7 @@ app = FastAPI(
     title="OpenSandbox Lifecycle API",
     version="0.1.0",
     description="The Sandbox Lifecycle API coordinates how untrusted workloads are created, "
-                "executed, paused, resumed, and finally disposed.",
+    "executed, paused, resumed, and finally disposed.",
     docs_url="/docs",
     redoc_url="/redoc",
     lifespan=lifespan,

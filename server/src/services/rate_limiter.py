@@ -111,9 +111,15 @@ class RateLimiter:
         hour_counter = self._hour_windows.get(api_key)
         create_counter = self._create_windows.get(api_key)
         return {
-            "minute_remaining": minute_counter.remaining if minute_counter else self._config.requests_per_minute,
-            "hour_remaining": hour_counter.remaining if hour_counter else self._config.requests_per_hour,
-            "create_remaining": create_counter.remaining if create_counter else self._config.sandbox_creates_per_hour,
+            "minute_remaining": minute_counter.remaining
+            if minute_counter
+            else self._config.requests_per_minute,
+            "hour_remaining": hour_counter.remaining
+            if hour_counter
+            else self._config.requests_per_hour,
+            "create_remaining": create_counter.remaining
+            if create_counter
+            else self._config.sandbox_creates_per_hour,
         }
 
 

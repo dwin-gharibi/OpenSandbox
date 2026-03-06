@@ -71,11 +71,16 @@ class TestSharingManager:
     def test_expired_share(self):
         mgr = SharingManager()
         share = mgr.create_share(
-            sandbox_id="sb-1", permissions=["read"], expires_in_hours=0,
+            sandbox_id="sb-1",
+            permissions=["read"],
+            expires_in_hours=0,
         )
         # Set expiration to past
         import datetime
-        past = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=1)).isoformat()
+
+        past = (
+            datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=1)
+        ).isoformat()
         share.expires_at = past
         result = mgr.validate_token(share.token)
         assert result is None

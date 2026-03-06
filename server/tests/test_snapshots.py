@@ -17,7 +17,9 @@ def _reset():
 class TestSnapshotManager:
     def test_create_snapshot(self):
         mgr = SnapshotManager()
-        snapshot = mgr.create_snapshot(sandbox_id="sb-1", container_id="c-1", description="test snapshot")
+        snapshot = mgr.create_snapshot(
+            sandbox_id="sb-1", container_id="c-1", description="test snapshot"
+        )
         assert snapshot.sandbox_id == "sb-1"
         assert snapshot.description == "test snapshot"
         assert snapshot.id

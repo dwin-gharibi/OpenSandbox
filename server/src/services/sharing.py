@@ -55,7 +55,9 @@ class SharingManager:
     ) -> ShareToken:
         expires_at = None
         if expires_in_hours is not None:
-            expires_at = (datetime.now(timezone.utc) + timedelta(hours=expires_in_hours)).isoformat()
+            expires_at = (
+                datetime.now(timezone.utc) + timedelta(hours=expires_in_hours)
+            ).isoformat()
 
         share = ShareToken(
             sandbox_id=sandbox_id,
@@ -71,12 +73,14 @@ class SharingManager:
             self._sandbox_tokens.setdefault(sandbox_id, []).append(share.id)
 
         bus = get_event_bus()
-        bus.publish(SandboxEvent(
-            event_type=EventType.SANDBOX_SHARED,
-            sandbox_id=sandbox_id,
-            actor=created_by,
-            data={"share_id": share.id, "permissions": permissions},
-        ))
+        bus.publish(
+            SandboxEvent(
+                event_type=EventType.SANDBOX_SHARED,
+                sandbox_id=sandbox_id,
+                actor=created_by,
+                data={"share_id": share.id, "permissions": permissions},
+            )
+        )
 
         return share
 

@@ -19,8 +19,11 @@ class TestHealthMonitor:
     def test_set_health_status(self):
         monitor = HealthMonitor()
         health = monitor.set_health_status(
-            sandbox_id="sb-1", status="healthy",
-            response_time_ms=50.0, cpu_percent=25.0, memory_percent=40.0,
+            sandbox_id="sb-1",
+            status="healthy",
+            response_time_ms=50.0,
+            cpu_percent=25.0,
+            memory_percent=40.0,
         )
         assert health.status == "healthy"
         assert health.checks_passed == 1

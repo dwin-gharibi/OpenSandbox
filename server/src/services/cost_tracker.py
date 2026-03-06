@@ -76,9 +76,7 @@ class CostTracker:
             self._conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_cost_apikey ON cost_records(api_key)"
             )
-            self._conn.execute(
-                "CREATE INDEX IF NOT EXISTS idx_cost_ts ON cost_records(timestamp)"
-            )
+            self._conn.execute("CREATE INDEX IF NOT EXISTS idx_cost_ts ON cost_records(timestamp)")
             self._conn.commit()
 
     def set_rate(self, resource_type: str, rate: float) -> None:
@@ -91,39 +89,72 @@ class CostTracker:
                    (id, sandbox_id, api_key, resource_type, quantity, unit, unit_cost, total_cost, timestamp, metadata)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
-                    rec.id, rec.sandbox_id, rec.api_key, rec.resource_type,
-                    rec.quantity, rec.unit, rec.unit_cost, rec.total_cost,
-                    rec.timestamp, json.dumps(rec.metadata),
+                    rec.id,
+                    rec.sandbox_id,
+                    rec.api_key,
+                    rec.resource_type,
+                    rec.quantity,
+                    rec.unit,
+                    rec.unit_cost,
+                    rec.total_cost,
+                    rec.timestamp,
+                    json.dumps(rec.metadata),
                 ),
             )
             self._conn.commit()
 
     def record_sandbox_usage(
-        self, sandbox_id: str, api_key: str, hours: float, cpu_seconds: float = 0, memory_mb_seconds: float = 0
+        self,
+        sandbox_id: str,
+        api_key: str,
+        hours: float,
+        cpu_seconds: float = 0,
+        memory_mb_seconds: float = 0,
     ) -> None:
         now = datetime.now(timezone.utc).isoformat()
         records = []
         if hours > 0:
             rate = self._rates.get("sandbox_hours", 0.01)
-            records.append(CostRecord(
-                sandbox_id=sandbox_id, api_key=api_key, resource_type="sandbox_hours",
-                quantity=hours, unit="hours", unit_cost=rate,
-                total_cost=round(hours * rate, 6), timestamp=now,
-            ))
+            records.append(
+                CostRecord(
+                    sandbox_id=sandbox_id,
+                    api_key=api_key,
+                    resource_type="sandbox_hours",
+                    quantity=hours,
+                    unit="hours",
+                    unit_cost=rate,
+                    total_cost=round(hours * rate, 6),
+                    timestamp=now,
+                )
+            )
         if cpu_seconds > 0:
             rate = self._rates.get("cpu_seconds", 0.00001)
-            records.append(CostRecord(
-                sandbox_id=sandbox_id, api_key=api_key, resource_type="cpu_seconds",
-                quantity=cpu_seconds, unit="seconds", unit_cost=rate,
-                total_cost=round(cpu_seconds * rate, 6), timestamp=now,
-            ))
+            records.append(
+                CostRecord(
+                    sandbox_id=sandbox_id,
+                    api_key=api_key,
+                    resource_type="cpu_seconds",
+                    quantity=cpu_seconds,
+                    unit="seconds",
+                    unit_cost=rate,
+                    total_cost=round(cpu_seconds * rate, 6),
+                    timestamp=now,
+                )
+            )
         if memory_mb_seconds > 0:
             rate = self._rates.get("memory_mb_seconds", 0.000001)
-            records.append(CostRecord(
-                sandbox_id=sandbox_id, api_key=api_key, resource_type="memory_mb_seconds",
-                quantity=memory_mb_seconds, unit="mb_seconds", unit_cost=rate,
-                total_cost=round(memory_mb_seconds * rate, 6), timestamp=now,
-            ))
+            records.append(
+                CostRecord(
+                    sandbox_id=sandbox_id,
+                    api_key=api_key,
+                    resource_type="memory_mb_seconds",
+                    quantity=memory_mb_seconds,
+                    unit="mb_seconds",
+                    unit_cost=rate,
+                    total_cost=round(memory_mb_seconds * rate, 6),
+                    timestamp=now,
+                )
+            )
         for r in records:
             self.record(r)
 
@@ -165,7 +196,9 @@ class CostTracker:
             "breakdown": breakdown,
         }
 
-    def get_summary(self, since: Optional[str] = None, until: Optional[str] = None) -> Dict[str, Any]:
+    def get_summary(
+        self, since: Optional[str] = None, until: Optional[str] = None
+    ) -> Dict[str, Any]:
         clauses: List[str] = []
         params: List[Any] = []
         if since:
@@ -213,24 +246,42 @@ def setup_cost_event_listener(bus: Optional[EventBus] = None) -> None:
 
     def _on_event(event: SandboxEvent) -> None:
         if event.event_type == EventType.SANDBOX_CREATED:
-            tracker.record(CostRecord(
-                sandbox_id=event.sandbox_id, api_key=event.actor,
-                resource_type="sandbox_hours", quantity=0, unit="hours",
-                unit_cost=tracker._rates.get("sandbox_hours", 0.01), total_cost=0,
-            ))
+            tracker.record(
+                CostRecord(
+                    sandbox_id=event.sandbox_id,
+                    api_key=event.actor,
+                    resource_type="sandbox_hours",
+                    quantity=0,
+                    unit="hours",
+                    unit_cost=tracker._rates.get("sandbox_hours", 0.01),
+                    total_cost=0,
+                )
+            )
         elif event.event_type == EventType.SANDBOX_SNAPSHOT_CREATED:
             rate = tracker._rates.get("snapshot", 0.005)
-            tracker.record(CostRecord(
-                sandbox_id=event.sandbox_id, api_key=event.actor,
-                resource_type="snapshot", quantity=1, unit="count",
-                unit_cost=rate, total_cost=rate,
-            ))
+            tracker.record(
+                CostRecord(
+                    sandbox_id=event.sandbox_id,
+                    api_key=event.actor,
+                    resource_type="snapshot",
+                    quantity=1,
+                    unit="count",
+                    unit_cost=rate,
+                    total_cost=rate,
+                )
+            )
         elif event.event_type == EventType.SANDBOX_CLONED:
             rate = tracker._rates.get("clone", 0.005)
-            tracker.record(CostRecord(
-                sandbox_id=event.sandbox_id, api_key=event.actor,
-                resource_type="clone", quantity=1, unit="count",
-                unit_cost=rate, total_cost=rate,
-            ))
+            tracker.record(
+                CostRecord(
+                    sandbox_id=event.sandbox_id,
+                    api_key=event.actor,
+                    resource_type="clone",
+                    quantity=1,
+                    unit="count",
+                    unit_cost=rate,
+                    total_cost=rate,
+                )
+            )
 
     event_bus.subscribe(None, _on_event)

@@ -31,7 +31,11 @@ class Snapshot:
 
 
 class SnapshotManager:
-    """Manages sandbox snapshots (checkpoints) using Docker commit."""
+    """Manages sandbox snapshots (checkpoints) using Docker commit.
+
+    Snapshots are stored in-memory with optional Docker image backing.
+    Each snapshot captures the full filesystem state of a running sandbox.
+    """
 
     def __init__(self) -> None:
         self._snapshots: Dict[str, Snapshot] = {}
@@ -45,13 +49,27 @@ class SnapshotManager:
         docker_client: Any = None,
         actor: str = "",
     ) -> Snapshot:
+        """Create a snapshot of a sandbox's current state.
+
+        Args:
+            sandbox_id: The sandbox to snapshot.
+            container_id: Docker container ID (used for docker commit).
+            description: Human-readable description.
+            docker_client: Optional Docker client for real commits.
+            actor: Identity of the user creating the snapshot.
+
+        Returns:
+            The created Snapshot object.
+        """
         snapshot_id = uuid4().hex
         tag = f"opensandbox/snapshot:{sandbox_id[:12]}-{snapshot_id[:8]}"
 
         if docker_client is not None:
             try:
                 container = docker_client.containers.get(container_id)
-                container.commit(repository="opensandbox/snapshot", tag=f"{sandbox_id[:12]}-{snapshot_id[:8]}")
+                container.commit(
+                    repository="opensandbox/snapshot", tag=f"{sandbox_id[:12]}-{snapshot_id[:8]}"
+                )
                 inspect = docker_client.images.get(tag)
                 size = getattr(inspect, "attrs", {}).get("Size", 0)
             except Exception:
@@ -72,12 +90,14 @@ class SnapshotManager:
             self._snapshots[snapshot_id] = snapshot
 
         bus = get_event_bus()
-        bus.publish(SandboxEvent(
-            event_type=EventType.SANDBOX_SNAPSHOT_CREATED,
-            sandbox_id=sandbox_id,
-            actor=actor,
-            data={"snapshot_id": snapshot_id, "image_tag": tag},
-        ))
+        bus.publish(
+            SandboxEvent(
+                event_type=EventType.SANDBOX_SNAPSHOT_CREATED,
+                sandbox_id=sandbox_id,
+                actor=actor,
+                data={"snapshot_id": snapshot_id, "image_tag": tag},
+            )
+        )
 
         return snapshot
 

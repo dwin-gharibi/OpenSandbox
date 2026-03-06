@@ -20,7 +20,9 @@ from src.api.schema import Endpoint
 
 
 class _FakeStreamingResponse:
-    def __init__(self, status_code: int = 200, headers: dict | None = None, chunks: list[bytes] | None = None):
+    def __init__(
+        self, status_code: int = 200, headers: dict | None = None, chunks: list[bytes] | None = None
+    ):
         self.status_code = status_code
         self.headers = headers or {}
         self._chunks = chunks or []

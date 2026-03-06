@@ -504,7 +504,48 @@ Run build and test pipelines in isolated environments:
 - **Artifact Collection**: Download build outputs
 - **Resource Limits**: Prevent resource exhaustion
 
-## 8. Conclusion
+## 8. Platform Features
+
+The lifecycle server includes several built-in platform capabilities:
+
+### 8.1 Observability & Metrics
+
+- **Prometheus Metrics** (`/metrics/prometheus`): Request counts, latency histograms, active sandbox gauges, snapshot/clone counters, WebSocket connection tracking, and rate limit hit counters.
+- **Health Monitoring** (`/admin/dashboard`): Aggregated health status, CPU/memory averages, request rate, and per-sandbox health tracking.
+
+### 8.2 Security & Access Control
+
+- **Multi-API-Key RBAC**: Multiple API keys with `admin`, `user`, and `viewer` roles. Each role has a defined permission set (e.g., viewers can only read; admins can manage keys and audit logs).
+- **Rate Limiting**: Sliding-window rate limiter with per-minute, per-hour, and per-create-operation limits. Configurable per API key.
+- **Audit Logging**: SQLite-backed audit trail recording all sandbox operations with actor, action, resource, outcome, and request metadata.
+
+### 8.3 Sandbox Operations
+
+- **Snapshots / Checkpointing**: Docker-commit-based snapshots that capture a sandbox's filesystem state. Create, list, and delete snapshots via REST API.
+- **Cloning**: Clone a sandbox from a snapshot to create identical copies for parallel exploration.
+- **Sharing / Collaboration**: Token-based sandbox sharing with configurable permissions (`read`/`write`/`admin`), expiration, and usage limits.
+- **WebSocket Proxy**: Full-duplex WebSocket proxying at `/sandboxes/{id}/ws/{port}/{path}` for real-time terminal sessions and live interactions.
+
+### 8.4 Lifecycle Automation
+
+- **TTL Auto-Extension**: Automatically extends sandbox lifetime based on recent API activity, preventing active sandboxes from expiring unexpectedly.
+- **Event Bus & Webhooks**: In-process pub/sub event system with external webhook delivery for `sandbox.created`, `sandbox.deleted`, `sandbox.snapshot.created`, and other lifecycle events.
+- **Cost Tracking**: Per-sandbox and per-API-key resource consumption tracking for billing and capacity planning.
+
+### 8.5 Borna Dashboard
+
+**Borna** is a Next.js-based health monitoring dashboard for OpenSandbox. It provides:
+
+- Real-time dashboard with health distribution charts and resource usage graphs
+- Sandbox management with snapshot, clone, and share actions
+- API key management with RBAC roles
+- Searchable audit log viewer with pagination
+- Cost tracking with per-sandbox lookup
+- Webhook management interface
+
+See [`borna/README.md`](../borna/README.md) for setup instructions.
+
+## 9. Conclusion
 
 OpenSandbox provides a complete, production-ready platform for building AI-powered applications that require safe code execution, file management, and command execution in isolated environments. The architecture is designed to be:
 
@@ -516,7 +557,7 @@ OpenSandbox provides a complete, production-ready platform for building AI-power
 
 The protocol-first design ensures that all components can evolve independently while maintaining compatibility. Whether you're building AI coding assistants, interactive notebooks, or remote development environments, OpenSandbox provides the foundation you need.
 
-## 9. References
+## 10. References
 
 - [Contributing Guide](contributing.md)
 - [Sandbox Lifecycle Spec](../specs/sandbox-lifecycle.yml)
@@ -525,4 +566,5 @@ The protocol-first design ensures that all components can evolve independently w
 - [execd Documentation](../components/execd/README.md)
 - [Python SDK](../sdks/sandbox/python/README.md)
 - [Java/Kotlin SDK](../sdks/sandbox/kotlin/README.md)
+- [Borna Dashboard](../borna/README.md)
 - [Examples](../examples/README.md)

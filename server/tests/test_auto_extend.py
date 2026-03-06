@@ -30,10 +30,12 @@ class TestAutoExtendManager:
         assert stats["last_activity"] is not None
 
     def test_should_extend_with_recent_activity(self):
-        mgr = AutoExtendManager(AutoExtendConfig(
-            activity_window_seconds=300,
-            min_remaining_seconds=120,
-        ))
+        mgr = AutoExtendManager(
+            AutoExtendConfig(
+                activity_window_seconds=300,
+                min_remaining_seconds=120,
+            )
+        )
         mgr.record_activity("sb-1")
         # Sandbox expiring in 60 seconds (< 120 threshold)
         expires = datetime.now(timezone.utc) + timedelta(seconds=60)
@@ -52,9 +54,12 @@ class TestAutoExtendManager:
         assert mgr.should_extend("sb-1", expires) is False
 
     def test_max_extensions(self):
-        mgr = AutoExtendManager(AutoExtendConfig(
-            max_extensions=2, min_remaining_seconds=120,
-        ))
+        mgr = AutoExtendManager(
+            AutoExtendConfig(
+                max_extensions=2,
+                min_remaining_seconds=120,
+            )
+        )
         mgr.record_activity("sb-1")
         mgr.mark_extended("sb-1")
         mgr.mark_extended("sb-1")
@@ -92,9 +97,12 @@ class TestAutoExtendManager:
         bus = EventBus()
         setup_auto_extend_listener(bus)
         mgr = get_auto_extend_manager()
-        bus.publish(SandboxEvent(
-            event_type=EventType.API_REQUEST, sandbox_id="sb-1",
-        ))
+        bus.publish(
+            SandboxEvent(
+                event_type=EventType.API_REQUEST,
+                sandbox_id="sb-1",
+            )
+        )
         stats = mgr.get_stats("sb-1")
         assert stats["last_activity"] is not None
 
@@ -104,9 +112,12 @@ class TestAutoExtendManager:
         mgr = get_auto_extend_manager()
         mgr.record_activity("sb-1")
         mgr.mark_extended("sb-1")
-        bus.publish(SandboxEvent(
-            event_type=EventType.SANDBOX_DELETED, sandbox_id="sb-1",
-        ))
+        bus.publish(
+            SandboxEvent(
+                event_type=EventType.SANDBOX_DELETED,
+                sandbox_id="sb-1",
+            )
+        )
         stats = mgr.get_stats("sb-1")
         assert stats["extension_count"] == 0
 
