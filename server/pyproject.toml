@@ -42,15 +42,19 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
+    "aiosqlite>=0.22.1",
     "docker",
     "fastapi",
     "httpx[socks]",
     "kubernetes",
+    "prometheus-client>=0.24.1",
     "pydantic",
     "pydantic-settings",
     "pyyaml",
+    "slowapi>=0.1.9",
     "tomli; python_version < \"3.11\"",
     "uvicorn",
+    "websockets>=16.0",
 ]
 
 [project.urls]

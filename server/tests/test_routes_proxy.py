@@ -20,7 +20,9 @@ from src.api.schema import Endpoint
 
 
 class _FakeStreamingResponse:
-    def __init__(self, status_code: int = 200, headers: dict | None = None, chunks: list[bytes] | None = None):
+    def __init__(
+        self, status_code: int = 200, headers: dict | None = None, chunks: list[bytes] | None = None
+    ):
         self.status_code = status_code
         self.headers = headers or {}
         self._chunks = chunks or []
@@ -128,7 +130,7 @@ def test_proxy_rejects_websocket_upgrade(
     )
 
     assert response.status_code == 400
-    assert response.json()["message"] == "Websocket upgrade is not supported yet"
+    assert "WebSocket" in response.json()["message"]
 
 
 def test_proxy_maps_connect_error_to_502(

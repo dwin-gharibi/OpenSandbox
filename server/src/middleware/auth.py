@@ -28,6 +28,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from src.config import AppConfig, get_config
 
+
 class AuthMiddleware(BaseHTTPMiddleware):
     """
     Middleware for API Key authentication.
@@ -39,7 +40,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
     API_KEY_HEADER = "OPEN-SANDBOX-API-KEY"
 
     # Paths that don't require authentication
-    EXEMPT_PATHS = ["/health", "/docs", "/redoc", "/openapi.json"]
+    EXEMPT_PATHS = ["/health", "/docs", "/redoc", "/openapi.json", "/metrics/prometheus"]
 
     # Strict pattern for proxy-to-sandbox: /sandboxes/{id}/proxy/{port}/... with numeric port only.
     # Matches the actual route in lifecycle.py; rejects path traversal (..) and malformed port.
@@ -113,7 +114,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 content={
                     "code": "MISSING_API_KEY",
                     "message": "Authentication credentials are missing. "
-                              "Provide API key via OPEN-SANDBOX-API-KEY header.",
+                    "Provide API key via OPEN-SANDBOX-API-KEY header.",
                 },
             )
 
@@ -124,7 +125,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 content={
                     "code": "INVALID_API_KEY",
                     "message": "Authentication credentials are invalid. "
-                              "Check your API key and try again.",
+                    "Check your API key and try again.",
                 },
             )
 

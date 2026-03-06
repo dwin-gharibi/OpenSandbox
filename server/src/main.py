@@ -65,18 +65,24 @@ _log_config["loggers"]["src"] = {
 }
 
 logging.config.dictConfig(_log_config)
-logging.getLogger().setLevel(
-    getattr(logging, app_config.server.log_level.upper(), logging.INFO)
-)
+logging.getLogger().setLevel(getattr(logging, app_config.server.log_level.upper(), logging.INFO))
 
 from src.api.lifecycle import router  # noqa: E402
+from src.api.features import features_router  # noqa: E402
 from src.middleware.auth import AuthMiddleware  # noqa: E402
 from src.middleware.request_id import RequestIdMiddleware  # noqa: E402
+from src.middleware.metrics_middleware import MetricsMiddleware  # noqa: E402
 from src.services.runtime_resolver import (  # noqa: E402
     validate_secure_runtime_on_startup,
 )
+from src.services.event_bus import get_event_bus  # noqa: E402
+from src.services.audit import setup_audit_event_listener  # noqa: E402
+from src.services.cost_tracker import setup_cost_event_listener  # noqa: E402
+from src.services.auto_extend import setup_auto_extend_listener  # noqa: E402
+from src.services.rbac import get_rbac_manager  # noqa: E402
 
 logger = logging.getLogger(__name__)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -110,8 +116,22 @@ async def lifespan(app: FastAPI):
         from src.services.factory import create_sandbox_service
 
         app.state.sandbox_service = create_sandbox_service()
+
+        # Initialize event bus and register listeners
+        event_bus = get_event_bus()
+        setup_audit_event_listener(event_bus)
+        setup_cost_event_listener(event_bus)
+        setup_auto_extend_listener(event_bus)
+        app.state.event_bus = event_bus
+
+        # Load config API key into RBAC manager
+        rbac = get_rbac_manager()
+        rbac.load_from_config(app_config.server.api_key)
+        app.state.rbac_manager = rbac
+
+        logger.info("All feature subsystems initialized")
     except Exception as exc:
-        logger.error("Secure runtime validation failed: %s", exc)
+        logger.error("Startup validation failed: %s", exc)
         raise
 
     yield
@@ -123,7 +143,7 @@ app = FastAPI(
     title="OpenSandbox Lifecycle API",
     version="0.1.0",
     description="The Sandbox Lifecycle API coordinates how untrusted workloads are created, "
-                "executed, paused, resumed, and finally disposed.",
+    "executed, paused, resumed, and finally disposed.",
     docs_url="/docs",
     redoc_url="/redoc",
     lifespan=lifespan,
@@ -133,8 +153,8 @@ app = FastAPI(
 app.state.config = app_config
 
 # Middleware run in reverse order of addition: last added = first to run (outermost).
-# Add auth and CORS first so they run after RequestIdMiddleware.
 app.add_middleware(AuthMiddleware, config=app_config)
+app.add_middleware(MetricsMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -142,13 +162,13 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-# RequestIdMiddleware last = outermost: runs first, so every response (including
-# 401 from AuthMiddleware) gets X-Request-ID and logs have request_id in context.
 app.add_middleware(RequestIdMiddleware)
 
 # Include API routes at root and versioned prefix
 app.include_router(router)
 app.include_router(router, prefix="/v1")
+app.include_router(features_router)
+app.include_router(features_router, prefix="/v1")
 
 DEFAULT_ERROR_CODE = "GENERAL::UNKNOWN_ERROR"
 DEFAULT_ERROR_MESSAGE = "An unexpected error occurred."
