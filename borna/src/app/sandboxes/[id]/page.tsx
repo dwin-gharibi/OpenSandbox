@@ -12,10 +12,13 @@ import {
   getSandbox, deleteSandbox, pauseSandbox, resumeSandbox, renewExpiration,
   getEndpoint, getSandboxHealth, getSandboxCost, getAutoExtend,
   createSnapshot, listSnapshots, getSnapshot, deleteSnapshot, cloneSandbox,
-  createShare, listShares, revokeShare,
+  createShare, listShares, revokeShare, applyExtensions, listExtensions,
   type Sandbox, type SandboxHealth, type SandboxCost, type AutoExtendStats,
-  type SnapshotInfo, type ShareInfo, type Endpoint,
+  type SnapshotInfo, type ShareInfo, type Endpoint, type ExtensionInfo,
 } from "@/lib/api";
+import { SandboxTerminal } from "@/components/sandbox-terminal";
+import { CodeRunner } from "@/components/code-runner";
+import { VncViewer } from "@/components/vnc-viewer";
 
 export default function SandboxDetailPage() {
   const params = useParams();
@@ -31,7 +34,7 @@ export default function SandboxDetailPage() {
   const [endpoint, setEndpoint] = useState<Endpoint | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [tab, setTab] = useState<"overview" | "snapshots" | "shares" | "endpoints">("overview");
+  const [tab, setTab] = useState<"overview" | "terminal" | "code" | "snapshots" | "shares" | "extensions" | "vnc" | "endpoints">("overview");
 
   const fetchAll = async () => {
     try {
@@ -133,11 +136,34 @@ export default function SandboxDetailPage() {
     } catch (e: any) { alert(e.message); }
   };
 
+  const [availableExtensions, setAvailableExtensions] = useState<ExtensionInfo[]>([]);
+  const [selectedExtensions, setSelectedExtensions] = useState<string[]>([]);
+  const [extensionScript, setExtensionScript] = useState("");
+
   const handleViewSnapshot = async (snapId: string) => {
     try {
       const snap = await getSnapshot(snapId);
       setSelectedSnapshot(snap);
     } catch (e: any) { alert(e.message); }
+  };
+
+  const loadExtensions = async () => {
+    try { setAvailableExtensions(await listExtensions()); } catch { /* ignore */ }
+  };
+
+  const handleApplyExtensions = async () => {
+    if (selectedExtensions.length === 0) { alert("Select at least one extension"); return; }
+    try {
+      const result = await applyExtensions(id, selectedExtensions);
+      setExtensionScript(result.setup_script);
+      alert(`Extensions ready! Setup script generated for: ${selectedExtensions.join(", ")}`);
+    } catch (e: any) { alert(e.message); }
+  };
+
+  const toggleExtension = (extId: string) => {
+    setSelectedExtensions((prev) =>
+      prev.includes(extId) ? prev.filter((e) => e !== extId) : [...prev, extId]
+    );
   };
 
   const handleRevokeShare = async (shareId: string) => {
@@ -156,8 +182,12 @@ export default function SandboxDetailPage() {
 
   const tabs = [
     { key: "overview", label: "Overview" },
+    { key: "terminal", label: "Terminal" },
+    { key: "code", label: "Code" },
     { key: "snapshots", label: `Snapshots (${snapshots.length})` },
     { key: "shares", label: `Shares (${shares.length})` },
+    { key: "extensions", label: "Extensions" },
+    { key: "vnc", label: "VNC" },
     { key: "endpoints", label: "Endpoints" },
   ] as const;
 
@@ -331,6 +361,73 @@ export default function SandboxDetailPage() {
               </div>
             )}
           </div>
+        )}
+
+        {tab === "terminal" && (
+          <div className="space-y-4">
+            <p className="text-sm text-[var(--text-secondary)]">
+              Execute shell commands directly inside the sandbox via the execd daemon.
+            </p>
+            <SandboxTerminal sandboxId={id} />
+          </div>
+        )}
+
+        {tab === "code" && (
+          <div className="space-y-4">
+            <p className="text-sm text-[var(--text-secondary)]">
+              Run code in multiple languages using the sandbox&apos;s Jupyter kernels.
+            </p>
+            <CodeRunner sandboxId={id} />
+          </div>
+        )}
+
+        {tab === "extensions" && (
+          <div className="space-y-4">
+            <p className="text-sm text-[var(--text-secondary)]">
+              Install tools and services into this sandbox.
+            </p>
+            {availableExtensions.length === 0 ? (
+              <button onClick={loadExtensions} className="btn btn-primary">Load Available Extensions</button>
+            ) : (
+              <>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {availableExtensions.map((ext) => (
+                    <div
+                      key={ext.id}
+                      onClick={() => toggleExtension(ext.id)}
+                      className={`card cursor-pointer p-3 transition-all ${selectedExtensions.includes(ext.id) ? "border-[var(--accent)] bg-[var(--accent)] bg-opacity-5" : ""}`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <input type="checkbox" checked={selectedExtensions.includes(ext.id)} readOnly className="accent-[var(--accent)]" />
+                        <div>
+                          <p className="font-medium text-sm">{ext.name}</p>
+                          <p className="text-xs text-[var(--text-secondary)]">{ext.description}</p>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                {selectedExtensions.length > 0 && (
+                  <button onClick={handleApplyExtensions} className="btn btn-primary">
+                    Apply {selectedExtensions.length} Extension{selectedExtensions.length > 1 ? "s" : ""}
+                  </button>
+                )}
+                {extensionScript && (
+                  <div className="card">
+                    <h3 className="font-semibold mb-2">Setup Script</h3>
+                    <pre className="text-xs bg-[#0d1117] text-[#c9d1d9] p-4 rounded-lg overflow-x-auto max-h-60">{extensionScript}</pre>
+                    <p className="text-xs text-[var(--text-secondary)] mt-2">
+                      Run this script in the Terminal tab, or copy and execute manually.
+                    </p>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
+
+        {tab === "vnc" && (
+          <VncViewer sandboxId={id} />
         )}
 
         {tab === "endpoints" && (

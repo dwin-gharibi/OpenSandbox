@@ -35,6 +35,7 @@ from src.services.rate_limiter import get_rate_limiter
 from src.services.rbac import get_rbac_manager
 from src.services.sharing import get_sharing_manager
 from src.services.snapshots import get_snapshot_manager
+from src.services.extensions import get_extension_registry
 
 logger = logging.getLogger(__name__)
 
@@ -479,11 +480,52 @@ async def validate_share_token(
 
 
 @features_router.get("/admin/dashboard")
-async def health_dashboard() -> Dict[str, Any]:
+async def health_dashboard(request: Request) -> Dict[str, Any]:
     monitor = get_health_monitor()
     dashboard = monitor.get_dashboard()
+
+    sandbox_items: list = []
+    total_from_service = 0
+    state_counts: Dict[str, int] = {}
+    try:
+        from src.api.schema import ListSandboxesRequest, PaginationRequest, SandboxFilter
+        from src.services.factory import create_sandbox_service
+        svc = create_sandbox_service()
+        result = svc.list_sandboxes(ListSandboxesRequest(
+            filter=SandboxFilter(),
+            pagination=PaginationRequest(page=1, pageSize=200),
+        ))
+        total_from_service = result.pagination.total_items
+        for sb in result.items:
+            state = (sb.status.state or "").lower()
+            state_counts[state] = state_counts.get(state, 0) + 1
+            h = monitor.get_health(sb.id)
+            sandbox_items.append({
+                "sandbox_id": sb.id,
+                "image": sb.image.uri,
+                "state": sb.status.state,
+                "status": h.status if h else "unknown",
+                "last_check": h.last_check if h else None,
+                "response_time_ms": h.response_time_ms if h else 0,
+                "cpu_percent": h.cpu_percent if h else 0,
+                "memory_percent": h.memory_percent if h else 0,
+                "created_at": sb.created_at.isoformat() if sb.created_at else None,
+                "expires_at": sb.expires_at.isoformat() if sb.expires_at else None,
+            })
+    except Exception:
+        logger.debug("Could not fetch sandbox list for dashboard", exc_info=True)
+
+    running = state_counts.get("running", 0)
+    paused = state_counts.get("paused", 0) + state_counts.get("pausing", 0)
+    failed = state_counts.get("failed", 0) + state_counts.get("terminated", 0)
+    pending = state_counts.get("pending", 0)
+
     return {
-        "total_sandboxes": dashboard.total_sandboxes,
+        "total_sandboxes": total_from_service,
+        "running": running,
+        "paused": paused,
+        "failed": failed,
+        "pending": pending,
         "healthy": dashboard.healthy,
         "unhealthy": dashboard.unhealthy,
         "degraded": dashboard.degraded,
@@ -493,7 +535,7 @@ async def health_dashboard() -> Dict[str, Any]:
         "avg_memory_percent": dashboard.avg_memory_percent,
         "uptime_seconds": dashboard.uptime_seconds,
         "requests_per_minute": dashboard.requests_per_minute,
-        "sandboxes": dashboard.sandboxes,
+        "sandboxes": sandbox_items,
     }
 
 
@@ -524,6 +566,91 @@ async def sandbox_health(sandbox_id: str) -> Dict[str, Any]:
 async def auto_extend_status(sandbox_id: str) -> Dict[str, Any]:
     mgr = get_auto_extend_manager()
     return mgr.get_stats(sandbox_id)
+
+
+# ============================================================================
+# Extensions
+# ============================================================================
+
+
+@features_router.get("/extensions")
+async def list_extensions(
+    category: Optional[str] = Query(None),
+    search: Optional[str] = Query(None, alias="q"),
+) -> List[Dict[str, Any]]:
+    registry = get_extension_registry()
+    if search:
+        exts = registry.search(search)
+    elif category:
+        exts = registry.list_by_category(category)
+    else:
+        exts = registry.list_all()
+    return [
+        {
+            "id": e.id,
+            "name": e.name,
+            "description": e.description,
+            "category": e.category,
+            "icon": e.icon,
+            "tags": e.tags,
+            "ports": e.ports,
+            "env": e.env,
+            "packages": e.packages,
+            "resource_hints": e.resource_hints,
+        }
+        for e in exts
+    ]
+
+
+@features_router.get("/extensions/categories")
+async def list_extension_categories() -> List[str]:
+    return get_extension_registry().get_categories()
+
+
+@features_router.get("/extensions/{ext_id}")
+async def get_extension(ext_id: str) -> Dict[str, Any]:
+    ext = get_extension_registry().get(ext_id)
+    if ext is None:
+        raise HTTPException(status_code=404, detail={"code": "EXTENSION_NOT_FOUND", "message": f"Extension '{ext_id}' not found"})
+    return {
+        "id": ext.id,
+        "name": ext.name,
+        "description": ext.description,
+        "category": ext.category,
+        "icon": ext.icon,
+        "tags": ext.tags,
+        "ports": ext.ports,
+        "env": ext.env,
+        "packages": ext.packages,
+        "setup_commands": ext.setup_commands,
+        "resource_hints": ext.resource_hints,
+    }
+
+
+class ApplyExtensionsRequest(BaseModel):
+    extensions: List[str] = Field(..., description="List of extension IDs to apply")
+
+
+@features_router.post("/sandboxes/{sandbox_id}/extensions")
+async def apply_extensions(sandbox_id: str, request: ApplyExtensionsRequest) -> Dict[str, Any]:
+    """Generate and execute the setup script for selected extensions inside a sandbox."""
+    registry = get_extension_registry()
+    missing = [eid for eid in request.extensions if registry.get(eid) is None]
+    if missing:
+        raise HTTPException(status_code=400, detail={"code": "EXTENSION_NOT_FOUND", "message": f"Unknown extensions: {', '.join(missing)}"})
+
+    script = registry.get_setup_script(request.extensions)
+    env = registry.get_combined_env(request.extensions)
+    ports = registry.get_combined_ports(request.extensions)
+
+    return {
+        "sandbox_id": sandbox_id,
+        "extensions": request.extensions,
+        "setup_script": script,
+        "env": env,
+        "ports": ports,
+        "status": "ready",
+    }
 
 
 # ============================================================================

@@ -14,6 +14,7 @@ import {
   Gauge,
   LogOut,
   Plus,
+  Package,
 } from "lucide-react";
 import { clearApiKey, hasApiKey } from "@/lib/api";
 
@@ -23,6 +24,7 @@ const navSections = [
     items: [
       { href: "/", label: "Dashboard", icon: LayoutDashboard },
       { href: "/sandboxes", label: "Sandboxes", icon: Box },
+      { href: "/extensions", label: "Extensions", icon: Package },
     ],
   },
   {
